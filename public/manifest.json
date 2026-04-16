@@ -14,6 +14,7 @@
     },
     "manifest_version": 3,
     "permissions": [
+        "activeTab",
         "windows",
         "tabGroups",
         "tabs",
@@ -28,7 +29,13 @@
         "default_path": "sidepanel.html"
     },
     "host_permissions": [
-        "http://*/*",
-        "https://*/*"
+        "<all_urls>"
+    ],
+    "content_scripts": [
+        {
+            "matches": ["http://*/*", "https://*/*"],
+            "js": ["content.js"],
+            "run_at": "document_idle"
+        }
     ]
 }

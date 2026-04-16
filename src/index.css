@@ -1,3 +1,132 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.app-root {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Make camel-ui Tabs fill remaining height */
+.app-root > div:last-child {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tabs-panel-selected {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Ensure selected tab button stays above panel to hide the border overlap */
+.tabs-button-selected {
+  z-index: 2;
+}
+
+.settings-float {
+  position: fixed;
+  top: 6px;
+  right: 8px;
+  z-index: 100;
+}
+
+/* Unify label styles inside settings dialog */
+.dialog-dialog .select-container label {
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  color: #6b7280 !important;
+}
+
+.dialog-dialog .input-container label,
+.dialog-dialog .select-container label {
+  margin: 3px 0 !important;
+}
+
+.dialog-dialog .settings-secret-field {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0.25rem;
+}
+
+.dialog-dialog .settings-secret-field label {
+  margin: 3px 0 !important;
+}
+
+.dialog-dialog .settings-secret-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.dialog-dialog .settings-secret-input {
+  width: 100%;
+  min-height: 3rem;
+  border: 1px solid;
+  padding: 0.5rem 2.75rem 0.5rem 0.75rem;
+  border-radius: 0.125rem;
+  box-shadow: 1px 1px var(--w-green-dark), 2px 2px var(--w-black-dark), inset 0 0 0 2px var(--w-indigo-dark);
+  margin: 0 2px 2px 0;
+  font-size: 1rem;
+  font-weight: 400;
+  transition: 0.4s;
+}
+
+.dialog-dialog .settings-secret-input:hover,
+.dialog-dialog .settings-secret-input:focus {
+  box-shadow: 2px 2px var(--w-green-light), 3px 3px var(--w-black-dark), inset 0 0 0 2px var(--w-black);
+}
+
+.dialog-dialog .settings-secret-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #111827;
+  border-radius: 6px;
+  background: #fff;
+  color: #4b5563;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.dialog-dialog .settings-secret-toggle:hover,
+.dialog-dialog .settings-secret-toggle:focus {
+  background: #fef3c7;
+  color: #111827;
+  border-color: #92400e;
+}
+
+.dialog-dialog .settings-secret-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Fix camel-ui checkbox text vertical alignment */
+.checkbox-container label {
+  align-items: center;
+  line-height: 20px;
+}
+
+.checkbox-container label > :not(input):not(.checkmark) {
+  display: inline-flex;
+  align-items: center;
+  margin: 3px 0;
+}

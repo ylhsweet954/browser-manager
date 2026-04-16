@@ -7,5 +7,5 @@ button .details {
 }
 
 .button:focus:not(:hover) {
-    background: var(--w-red);
+    background: var(--w-yellow);
 }
