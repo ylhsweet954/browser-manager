@@ -202,6 +202,43 @@
   justify-content: flex-end;
 }
 
+.chat-msg-user-inner {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 90%;
+}
+
+.chat-user-rewind-btn {
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-user-rewind-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+/* Bubble fills row next to rewind control; parent already caps width */
+.chat-msg-user-inner .chat-bubble {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .chat-msg-assistant {
   justify-content: flex-start;
 }

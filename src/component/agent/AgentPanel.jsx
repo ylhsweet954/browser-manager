@@ -14,8 +14,10 @@ import {
 } from "../../api/skills";
 import ChatMessage from "./ChatMessage";
 import McpConfig from "./McpConfig";
+import UserProfilePanel from "./UserProfilePanel";
 import SkillsConfig from "./SkillsConfig";
 import toast from "react-hot-toast";
+import { formatProfileForSystemPrompt } from "../../api/userProfile";
 import "./chat.css";
 
 /**
@@ -326,7 +328,7 @@ export default function AgentPanel() {
   async function switchSession(id) {
     // Save current session first
     const currentSessionId = activeSessionIdRef.current;
-    if (currentSessionId) {
+    if (currentSessionId && currentSessionId !== id) {
       const currentMessages = getSessionMessages(currentSessionId);
       if (currentMessages.length > 0) {
         await autoSave(currentSessionId, currentMessages);
@@ -339,6 +341,7 @@ export default function AgentPanel() {
   async function handleDeleteSession(id, e) {
     e.stopPropagation();
     stopSessionGeneration(id);
+
     sessionMessagesRef.current.delete(id);
     sessionRuntimeRef.current.delete(id);
     await deleteSession(id);
@@ -356,7 +359,8 @@ export default function AgentPanel() {
 
   // ==================== LLM Chat Logic ====================
 
-  function buildSystemPrompt() {
+  async function buildSystemPrompt() {
+    const memoryBlock = await formatProfileForSystemPrompt().catch(() => "");
     return (
       `You are a browser assistant running inside a browser environment.\n\n` +
       `You can use browser tools to inspect open tabs, tab groups, and windows, focus tabs and windows, move tabs between windows, open tabs, close tabs, create windows, close windows, group tabs, update groups, inspect page DOM, interact with page elements, extract page content, and search browser history.\n\n` +
@@ -377,7 +381,8 @@ export default function AgentPanel() {
       `- Use eval_js only when the structured DOM tools are insufficient.\n` +
       `- Some follow-up context messages may be added by the application to attach tool outputs such as screenshots. Treat them as internal tool context, not as a change in user intent.\n` +
       `- Respond in the same language as the user.` +
-      buildSkillsSystemPrompt(agentSkills)
+      buildSkillsSystemPrompt(agentSkills) +
+      memoryBlock
     );
   }
 
@@ -454,7 +459,7 @@ export default function AgentPanel() {
 
   async function runConversation(config, targetSessionId, conversationMessages, runId) {
     if (!isCurrentRun(targetSessionId, runId)) return;
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = await buildSystemPrompt();
     const apiConversationMessages = buildApiMessages(config.apiType, conversationMessages);
     const fullMessages = [{ role: "system", content: systemPrompt }, ...apiConversationMessages];
 
@@ -579,6 +584,31 @@ export default function AgentPanel() {
     }
   }
 
+  /**
+   * Truncate history to messages before this user message; put that message text in the input for editing.
+   */
+  function handleRewindToUserMessage(index) {
+    const currentSessionId = activeSessionIdRef.current;
+    if (!currentSessionId || typeof index !== "number" || index < 0) return;
+
+    const msgs = getSessionMessages(currentSessionId);
+    if (index >= msgs.length) return;
+
+    const target = msgs[index];
+    if (target?.role !== "user" || Array.isArray(target.content)) return;
+
+    const text = typeof target.content === "string" ? target.content : String(target.content ?? "");
+    stopSessionGeneration(currentSessionId);
+
+    const truncated = msgs.slice(0, index);
+    setSessionMessages(currentSessionId, truncated);
+    setInput(text);
+    void autoSave(currentSessionId, truncated);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }
+
   function formatTime(ts) {
     const d = new Date(ts);
     const now = new Date();
@@ -652,7 +682,12 @@ export default function AgentPanel() {
         ) : (
           <>
             {messages.map((msg, i) => (
-              <ChatMessage key={i} msg={msg} />
+              <ChatMessage
+                key={i}
+                msg={msg}
+                messageIndex={i}
+                onRewindToUserMessage={handleRewindToUserMessage}
+              />
             ))}
             {loading && messages[messages.length - 1]?.content === "" && (
               <div className="chat-msg chat-msg-assistant">
@@ -701,6 +736,7 @@ export default function AgentPanel() {
             onServerUrlChange={handleSkillsServerUrlChange}
             onLoad={handleLoadSkills}
           />
+          <UserProfilePanel />
           <McpConfig onToolsChanged={setMcpTools} />
           {loading ? (
             <Button className="!text-xs" onPress={stopGeneration}>停止</Button>

@@ -5,16 +5,39 @@ import { useState } from "react";
 
 /**
  * Render a single chat message based on its role and content.
+ * @param {object} props
+ * @param {object} props.msg
+ * @param {number} [props.messageIndex]
+ * @param {(index: number) => void} [props.onRewindToUserMessage]
  */
-export default function ChatMessage({ msg }) {
+export default function ChatMessage({ msg, messageIndex, onRewindToUserMessage }) {
   const { role, content } = msg;
 
   // User message
   if (role === "user") {
     if (Array.isArray(content)) return null; // skip Anthropic tool_result
+    const showRewind =
+      typeof messageIndex === "number" &&
+      typeof onRewindToUserMessage === "function";
     return (
       <div className="chat-msg chat-msg-user">
-        <div className="chat-bubble chat-bubble-user">{content}</div>
+        <div className="chat-msg-user-inner">
+          {showRewind && (
+            <button
+              type="button"
+              className="chat-user-rewind-btn"
+              title="回退到此消息（之后记录清除，内容填入输入框）"
+              aria-label="回退到此消息"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRewindToUserMessage(messageIndex);
+              }}
+            >
+              ↩
+            </button>
+          )}
+          <div className="chat-bubble chat-bubble-user">{content}</div>
+        </div>
       </div>
     );
   }

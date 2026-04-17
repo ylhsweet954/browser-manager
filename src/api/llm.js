@@ -19,7 +19,16 @@ const TOOLS = [
     description: "Get a snapshot of all currently open browser tabs. Returns each tab's id, url, title, and lastAccessed, plus capturedAt timing fields so you can judge whether the tab state may be stale and refresh it again if needed. Use when the user asks about open tabs, browser context, or page-related questions and you need to identify the right tab first.",
     schema: {
       type: "object",
-      properties: {},
+      properties: {
+        maxSize: {
+          type: "number",
+          description: "Maximum number of tabs to return. Defaults to -1 (no limit)."
+        },
+        briefUrl: {
+          type: "boolean",
+          description: "If true, return only the hostname (domain) instead of the full URL. Useful to reduce response size when full URLs are not needed."
+        }
+      },
       required: []
     }
   },
@@ -321,11 +330,33 @@ const TOOLS = [
   },
   {
     name: "tab_screenshot",
-    description: "Capture a screenshot of the currently visible tab. Returns a base64-encoded PNG image data URL. Note: can only capture the active tab of a window.",
+    description:
+      "Capture a screenshot of a browser tab. By default captures only the visible viewport using Chrome's captureVisibleTab (requires that tab to be active in its window). Set fullPage=true to stitch the full scroll height: read window.innerHeight, scroll to 0, capture, then for n=1,2,... scroll to (n*innerHeight), compare scrollY to n*innerHeight to detect the last clamped page; only the last tile crops the top so the bottom (n*innerHeight - scrollY) document pixels are kept. Tiles are aligned with no variable overlap between full pages. Captures are rate-limited for Chrome quota. Output is width-capped JPEG for readability. Stops early on maxScreens or canvas limits; check stoppedReason.",
     schema: {
       type: "object",
       properties: {
-        windowId: { type: "number", description: "Window ID to capture (default: current window)" }
+        windowId: { type: "number", description: "Window ID passed to captureVisibleTab (default: the resolved tab's window)" },
+        tabId: { type: "number", description: "Optional tab to capture. When omitted, uses the active tab in the last-focused window. When set, that tab is activated before capture." },
+        fullPage: {
+          type: "boolean",
+          description: "If true, scroll-stitch the full scrollable height. Defaults to false (single viewport screenshot)."
+        },
+        overlapPx: {
+          type: "number",
+          description: "Ignored for fullPage (legacy). Full-page stitch uses fixed innerHeight-aligned pages."
+        },
+        maxScreens: {
+          type: "number",
+          description: "When fullPage is true: maximum number of viewport captures (default 40, max 100)."
+        },
+        settleMs: {
+          type: "number",
+          description: "When fullPage is true: milliseconds to wait after each scroll for layout/lazy-load (default 250, max 5000)."
+        },
+        maxStableBottomPasses: {
+          type: "number",
+          description: "Ignored for fullPage (legacy)."
+        }
       },
       required: []
     }
@@ -605,8 +636,13 @@ function _parseDataUrl(dataUrl) {
 
 /**
  * Resize and recompress screenshots so they are practical for multimodal tool results.
+ *
+ * @param {string} dataUrl
+ * @param {{ strategy?: "fitMaxEdge" | "fitWidth", maxWidth?: number, maxHeight?: number, jpegQuality?: number }} [options]
+ *   - fitMaxEdge (default): scale so max(width,height) <= 1600 (single-viewport shots).
+ *   - fitWidth: only shrink when width exceeds maxWidth; keeps tall stitched pages readable (avoids crushing height).
  */
-async function _optimizeScreenshotDataUrl(dataUrl) {
+async function _optimizeScreenshotDataUrl(dataUrl, options = {}) {
   const parsed = _parseDataUrl(dataUrl);
   if (!parsed || typeof document === "undefined") {
     return {
@@ -621,6 +657,14 @@ async function _optimizeScreenshotDataUrl(dataUrl) {
     };
   }
 
+  const strategy = options.strategy === "fitWidth" ? "fitWidth" : "fitMaxEdge";
+  const jpegQuality =
+    typeof options.jpegQuality === "number"
+      ? Math.min(1, Math.max(0.5, options.jpegQuality))
+      : strategy === "fitWidth"
+        ? 0.88
+        : 0.7;
+
   try {
     const img = await new Promise((resolve, reject) => {
       const image = new Image();
@@ -631,10 +675,20 @@ async function _optimizeScreenshotDataUrl(dataUrl) {
 
     const originalWidth = img.naturalWidth || img.width || null;
     const originalHeight = img.naturalHeight || img.height || null;
-    const maxDimension = 1600;
-    const scale = originalWidth && originalHeight
-      ? Math.min(1, maxDimension / Math.max(originalWidth, originalHeight))
-      : 1;
+    let scale = 1;
+    if (originalWidth && originalHeight) {
+      if (strategy === "fitWidth") {
+        const maxW = Number.isFinite(options.maxWidth) ? Math.max(320, options.maxWidth) : 2048;
+        const maxH = Number.isFinite(options.maxHeight) ? Math.max(800, options.maxHeight) : 24000;
+        if (originalWidth > maxW) scale = maxW / originalWidth;
+        const hAfter = originalHeight * scale;
+        if (hAfter > maxH) scale *= maxH / hAfter;
+        scale = Math.min(1, scale);
+      } else {
+        const maxDimension = 1600;
+        scale = Math.min(1, maxDimension / Math.max(originalWidth, originalHeight));
+      }
+    }
     const width = originalWidth ? Math.max(1, Math.round(originalWidth * scale)) : null;
     const height = originalHeight ? Math.max(1, Math.round(originalHeight * scale)) : null;
 
@@ -645,7 +699,7 @@ async function _optimizeScreenshotDataUrl(dataUrl) {
     if (!ctx) throw new Error("2D canvas context unavailable");
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    const optimizedDataUrl = canvas.toDataURL("image/jpeg", jpegQuality);
     const optimizedParsed = _parseDataUrl(optimizedDataUrl);
     return {
       dataUrl: optimizedDataUrl,
@@ -777,13 +831,20 @@ function _serializeWindowMetadata(win, currentWindowId = null) {
 /**
  * Get info about all currently open tabs.
  */
-async function _execTabList() {
+async function _execTabList({ maxSize = -1, briefUrl = false } = {}) {
   const capturedAt = _buildCapturedAt();
-  const tabs = await chrome.tabs.query({});
+  let tabs = await chrome.tabs.query({});
+  if (maxSize > 0) tabs = tabs.slice(0, maxSize);
   return {
     capturedAt,
     count: tabs.length,
-    tabs: tabs.map(tab => _serializeTabMetadata(tab))
+    tabs: tabs.map(tab => {
+      const meta = _serializeTabMetadata(tab);
+      if (briefUrl) {
+        try { meta.url = new URL(meta.url).hostname; } catch { /* keep original */ }
+      }
+      return meta;
+    })
   };
 }
 
@@ -1804,27 +1865,388 @@ async function _execTabGetActive() {
   };
 }
 
+function _sleepMs(ms) {
+  const n = Math.max(0, Math.floor(ms));
+  if (!n) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, n));
+}
+
+async function _readPageScrollMetrics(tab) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const scroller = document.scrollingElement || document.documentElement || document.body;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const documentHeight = Math.max(
+          scroller?.scrollHeight || 0,
+          document.documentElement?.scrollHeight || 0,
+          document.body?.scrollHeight || 0
+        );
+        const scrollY = window.scrollY || scroller?.scrollTop || 0;
+        const maxScrollY = Math.max(0, documentHeight - viewportHeight);
+        return {
+          viewportHeight,
+          viewportWidth,
+          documentHeight,
+          scrollY,
+          maxScrollY,
+          atBottom: scrollY >= maxScrollY - 1.5
+        };
+      }
+    });
+    return results?.[0]?.result || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+async function _setPageScrollTop(tab, top) {
+  const y = Math.max(0, Number(top) || 0);
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (scrollTop) => {
+      window.scrollTo({ top: scrollTop, left: 0, behavior: "auto" });
+    },
+    args: [y]
+  });
+}
+
+async function _readInnerHeightAndScrollY(tab) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const scroller = document.scrollingElement || document.documentElement || document.body;
+        const innerHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const documentHeight = Math.max(
+          scroller?.scrollHeight || 0,
+          document.documentElement?.scrollHeight || 0,
+          document.body?.scrollHeight || 0
+        );
+        const scrollY = window.scrollY || scroller?.scrollTop || 0;
+        const maxScrollY = Math.max(0, documentHeight - innerHeight);
+        return { innerHeight, scrollY, maxScrollY, documentHeight };
+      }
+    });
+    return results?.[0]?.result || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+async function _loadImageFromDataUrl(dataUrl) {
+  return await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to decode screenshot image"));
+    image.src = dataUrl;
+  });
+}
+
+const FULL_PAGE_MAX_STITCH_PX = 16000;
+/** When true, draws a 2px red bar at each new tile boundary (top of stitched segment) for debugging. */
+const FULL_PAGE_STITCH_DEBUG_BORDER = false;
+
 /**
- * Capture a screenshot of the currently visible tab.
+ * Capture a screenshot of the currently visible tab (viewport), or full scroll height when fullPage is true.
  * Returns an optimized base64 image data URL.
  */
-async function _execTabScreenshot({ windowId }) {
-  const wid = windowId || chrome.windows.WINDOW_ID_CURRENT;
-  const rawDataUrl = await chrome.tabs.captureVisibleTab(wid, { format: "png" });
-  const optimized = await _optimizeScreenshotDataUrl(rawDataUrl);
-  return {
-    success: true,
-    dataUrl: optimized.dataUrl,
-    format: optimized.mediaType.split("/")[1] || "jpeg",
-    mediaType: optimized.mediaType,
-    approxBytes: optimized.approxBytes,
-    width: optimized.width,
-    height: optimized.height,
-    originalWidth: optimized.originalWidth,
-    originalHeight: optimized.originalHeight,
-    optimized: optimized.optimized,
-    note: "Optimized screenshot of the visible tab"
-  };
+async function _execTabScreenshot(args = {}) {
+  const {
+    windowId,
+    tabId,
+    fullPage,
+    maxScreens: maxScreensRaw,
+    settleMs: settleMsRaw
+  } = args;
+
+  const resolved = await _resolveControllableTab(tabId, "screenshot");
+  if (resolved.error) return { error: resolved.error };
+
+  const tab = resolved.tab;
+  const wid = typeof windowId === "number" ? windowId : tab.windowId;
+
+  const maxScreens = Number.isFinite(maxScreensRaw) ? Math.max(1, Math.min(100, Math.floor(maxScreensRaw))) : 40;
+  const settleMs = Number.isFinite(settleMsRaw) ? Math.max(0, Math.min(5000, settleMsRaw)) : 250;
+
+  const isFullPage = fullPage === true;
+
+  const baseNote = isFullPage
+    ? "Full-page stitch: tab window was focused; scroll position restored when possible."
+    : "Optimized screenshot of the visible tab.";
+
+  if (!isFullPage) {
+    try {
+      if (tabId != null) {
+        await chrome.tabs.update(tab.id, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+        await _sleepMs(80);
+      }
+      const rawDataUrl = await chrome.tabs.captureVisibleTab(wid, { format: "png" });
+      const optimized = await _optimizeScreenshotDataUrl(rawDataUrl);
+      return {
+        success: true,
+        fullPage: false,
+        tabId: tab.id,
+        windowId: tab.windowId,
+        dataUrl: optimized.dataUrl,
+        format: optimized.mediaType.split("/")[1] || "jpeg",
+        mediaType: optimized.mediaType,
+        approxBytes: optimized.approxBytes,
+        width: optimized.width,
+        height: optimized.height,
+        originalWidth: optimized.originalWidth,
+        originalHeight: optimized.originalHeight,
+        optimized: optimized.optimized,
+        note: baseNote
+      };
+    } catch (e) {
+      return {
+        error: e?.message || String(e),
+        hint: "captureVisibleTab requires the target tab to be active in its window. Pass tabId to focus that tab first."
+      };
+    }
+  }
+
+  const m0 = await _readPageScrollMetrics(tab);
+  if (!m0) {
+    return { error: "Unable to read scroll metrics for full-page screenshot." };
+  }
+  const initialScrollY = m0.scrollY;
+
+  let stoppedReason = "completed";
+  let canvas = null;
+  let ctx = null;
+  let destY = 0;
+  let slicesDrawn = 0;
+  let exitedCaptureLoopEarly = false;
+
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await _sleepMs(80);
+
+    await _setPageScrollTop(tab, 0);
+    if (settleMs) await _sleepMs(settleMs);
+
+    const hi0 = await _readInnerHeightAndScrollY(tab);
+    if (!hi0) {
+      return { error: "Unable to read innerHeight/scrollY for full-page screenshot." };
+    }
+
+    const windowHeight = Math.max(1, Math.round(hi0.innerHeight));
+    let lastScrollAfterStitch = hi0.scrollY;
+
+    /** Chrome throttles captureVisibleTab (~2/sec); stay under quota between real captures. */
+    const MIN_CAPTURE_GAP_MS = 650;
+    let lastCaptureAtMs = 0;
+
+    async function captureVisibleThrottled() {
+      const now = Date.now();
+      if (lastCaptureAtMs > 0) {
+        const waitMs = MIN_CAPTURE_GAP_MS - (now - lastCaptureAtMs);
+        if (waitMs > 0) await _sleepMs(waitMs);
+      }
+      const url = await chrome.tabs.captureVisibleTab(wid, { format: "png" });
+      lastCaptureAtMs = Date.now();
+      return url;
+    }
+
+    const layoutAfterTop = await _readPageScrollMetrics(tab);
+    const documentHeight = Math.max(windowHeight, layoutAfterTop?.documentHeight ?? windowHeight);
+
+    const raw0 = await captureVisibleThrottled();
+    const img0 = await _loadImageFromDataUrl(raw0);
+    const iw0 = img0.naturalWidth || img0.width;
+    const ih0 = img0.naturalHeight || img0.height;
+
+    canvas = document.createElement("canvas");
+    canvas.width = iw0;
+    const estRows = Math.ceil(documentHeight / windowHeight);
+    canvas.height = Math.min(
+      FULL_PAGE_MAX_STITCH_PX,
+      Math.max(ih0, Math.ceil(estRows * ih0))
+    );
+    ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+      return { error: "2D canvas context unavailable for full-page stitch." };
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img0, 0, 0);
+    destY = ih0;
+    slicesDrawn = 1;
+
+    let n = 1;
+    while (slicesDrawn < maxScreens) {
+      await _setPageScrollTop(tab, n * windowHeight);
+      if (settleMs) await _sleepMs(settleMs);
+
+      const st = await _readInnerHeightAndScrollY(tab);
+      if (!st) {
+        stoppedReason = "metrics_failed";
+        exitedCaptureLoopEarly = true;
+        break;
+      }
+      const vh = Math.max(1, Math.round(st.innerHeight));
+      const sy = st.scrollY;
+      const targetY = n * windowHeight;
+      const maxScrollY = Math.max(0, Number(st.maxScrollY) || 0);
+      /**
+       * True only when scrollY is pinned near maxScrollY (symmetric band).
+       * Using only sy >= maxScrollY - eps breaks when maxScrollY is underestimated (lazy layout):
+       * sy can already be far below a too-small maxScrollY, falsely looking "at bottom".
+       */
+      const EPS_PIN = 24;
+      const pinnedToMetricsBottom =
+        maxScrollY > 0 && Number.isFinite(sy) && Math.abs(sy - maxScrollY) <= EPS_PIN;
+      /** Requested scroll target lies past the furthest scrollable Y — browser clamped, this tile needs bottom crop. */
+      const requestPastDocumentEnd = targetY > maxScrollY + 0.5;
+
+      if (sy <= lastScrollAfterStitch + 0.5) {
+        stoppedReason = "completed";
+        exitedCaptureLoopEarly = true;
+        break;
+      }
+
+      const isLastPage = maxScrollY > 0 && requestPastDocumentEnd && pinnedToMetricsBottom;
+
+      const rawDataUrl = await captureVisibleThrottled();
+      const img = await _loadImageFromDataUrl(rawDataUrl);
+      const iw = img.naturalWidth || img.width;
+      const ih = img.naturalHeight || img.height;
+
+      let safeCropTop = 0;
+      if (isLastPage) {
+        const remainForLast = Math.max(0, targetY - sy);
+        const keepDocPx = Math.min(vh, remainForLast);
+        const cropTop = Math.round(ih - (keepDocPx / vh) * ih);
+        safeCropTop = Math.min(Math.max(0, cropTop), Math.max(0, ih - 1));
+      }
+
+      const sliceH = ih - safeCropTop;
+
+      if (destY + sliceH > FULL_PAGE_MAX_STITCH_PX) {
+        stoppedReason = "max_canvas";
+        exitedCaptureLoopEarly = true;
+        break;
+      }
+
+      if (destY + sliceH > canvas.height) {
+        const newH = Math.min(
+          FULL_PAGE_MAX_STITCH_PX,
+          Math.max(destY + sliceH, Math.ceil(canvas.height * 1.5))
+        );
+        if (newH < destY + sliceH) {
+          stoppedReason = "max_canvas";
+          exitedCaptureLoopEarly = true;
+          break;
+        }
+        const newCanvas = document.createElement("canvas");
+        newCanvas.width = canvas.width;
+        newCanvas.height = newH;
+        const nctx = newCanvas.getContext("2d", { alpha: false });
+        if (!nctx) {
+          return { error: "2D canvas context unavailable while resizing stitch canvas." };
+        }
+        nctx.fillStyle = "#ffffff";
+        nctx.fillRect(0, 0, newCanvas.width, newCanvas.height);
+        nctx.drawImage(canvas, 0, 0);
+        canvas = newCanvas;
+        ctx = nctx;
+      }
+
+      if (FULL_PAGE_STITCH_DEBUG_BORDER && slicesDrawn > 0 && destY > 0) {
+        ctx.fillStyle = "#ff0000";
+        ctx.fillRect(0, destY, canvas.width, 2);
+      }
+
+      ctx.drawImage(img, 0, safeCropTop, iw, sliceH, 0, destY, canvas.width, sliceH);
+      destY += sliceH;
+      slicesDrawn++;
+      lastScrollAfterStitch = sy;
+
+      if (isLastPage) {
+        stoppedReason = "completed";
+        exitedCaptureLoopEarly = true;
+        break;
+      }
+      n++;
+    }
+
+    if (slicesDrawn === 0) {
+      return {
+        error: "No screenshots captured for full page.",
+        hint: "Try a normal http(s) page with a scrollable document."
+      };
+    }
+
+    if (
+      !exitedCaptureLoopEarly &&
+      stoppedReason === "completed" &&
+      maxScreens > 1 &&
+      slicesDrawn >= maxScreens
+    ) {
+      stoppedReason = "max_screens";
+    }
+
+    const lastMetrics = await _readPageScrollMetrics(tab);
+    const trimmed = document.createElement("canvas");
+    trimmed.width = canvas.width;
+    trimmed.height = destY;
+    const tctx = trimmed.getContext("2d", { alpha: false });
+    if (!tctx) {
+      return { error: "Unable to finalize full-page canvas." };
+    }
+    tctx.drawImage(canvas, 0, 0);
+
+    const stitchedPng = trimmed.toDataURL("image/png");
+    const optimized = await _optimizeScreenshotDataUrl(stitchedPng, {
+      strategy: "fitWidth",
+      maxWidth: 2048,
+      maxHeight: 24000,
+      jpegQuality: 0.88
+    });
+
+    return {
+      success: true,
+      fullPage: true,
+      tabId: tab.id,
+      windowId: tab.windowId,
+      slices: slicesDrawn,
+      stoppedReason,
+      stitchMode: "pageAligned",
+      pageViewportCssPx: windowHeight,
+      maxScreens,
+      settleMs,
+      stitchedWidth: trimmed.width,
+      stitchedHeight: trimmed.height,
+      documentHeight: lastMetrics?.documentHeight ?? null,
+      dataUrl: optimized.dataUrl,
+      format: optimized.mediaType.split("/")[1] || "jpeg",
+      mediaType: optimized.mediaType,
+      approxBytes: optimized.approxBytes,
+      width: optimized.width,
+      height: optimized.height,
+      originalWidth: optimized.originalWidth,
+      originalHeight: optimized.originalHeight,
+      optimized: optimized.optimized,
+      note: baseNote
+    };
+  } catch (e) {
+    return {
+      error: e?.message || String(e),
+      hint: "Full-page capture failed. Ensure the page allows scripting and the tab stays active."
+    };
+  } finally {
+    try {
+      await _setPageScrollTop(tab, initialScrollY);
+    } catch (_e) {
+      /* ignore */
+    }
+  }
 }
 
 /**
