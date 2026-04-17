@@ -298,6 +298,19 @@ const TOOLS = [
     }
   },
   {
+    name: "history_recent",
+    description: "List recent browser history entries within a time range. Use when the user asks for recently visited pages without a keyword filter.",
+    schema: {
+      type: "object",
+      properties: {
+        startTime: { type: "number", description: "Optional inclusive start timestamp in milliseconds. Defaults to 7 days ago." },
+        endTime: { type: "number", description: "Optional inclusive end timestamp in milliseconds. Defaults to now." },
+        maxResults: { type: "number", description: "Maximum number of results to return (default 100, max 100)." }
+      },
+      required: []
+    }
+  },
+  {
     name: "tab_get_active",
     description: "Get a snapshot of the currently focused/active tab. Use when the user says 'this page', 'current page', 'the page I'm looking at', etc. Returns the tab's ID, URL, title, lastAccessed, and capturedAt timing fields so you can then use tab_extract to read its content and judge whether the snapshot may need refreshing.",
     schema: {
@@ -525,6 +538,7 @@ export async function executeTool(name, args, mcpRegistry = []) {
       case "group_remove_tabs": return await _execGroupRemoveTabs(args);
       case "group_ungroup": return await _execGroupUngroup(args);
       case "history_search": return await _execHistorySearch(args);
+      case "history_recent": return await _execHistoryRecent(args);
       case "tab_get_active": return await _execTabGetActive(args);
       case "tab_screenshot": return await _execTabScreenshot(args);
       case "window_list": return await _execWindowList(args);
@@ -1735,6 +1749,41 @@ async function _execHistorySearch({ query, maxResults }) {
     lastVisit: new Date(r.lastVisitTime).toISOString(),
     visitCount: r.visitCount
   }));
+}
+
+/**
+ * List recent browser history within a time range.
+ */
+async function _execHistoryRecent({ startTime, endTime, maxResults }) {
+  const now = Date.now();
+  const resolvedEndTime = Number.isFinite(endTime) ? endTime : now;
+  const resolvedStartTime = Number.isFinite(startTime)
+    ? startTime
+    : (resolvedEndTime - 7 * 24 * 60 * 60 * 1000);
+  const resolvedMaxResults = Math.min(100, Math.max(1, Number.isFinite(maxResults) ? Math.floor(maxResults) : 100));
+
+  if (resolvedStartTime > resolvedEndTime) {
+    return { error: "startTime must be less than or equal to endTime" };
+  }
+
+  const results = await chrome.history.search({
+    text: "",
+    maxResults: resolvedMaxResults,
+    startTime: resolvedStartTime,
+    endTime: resolvedEndTime
+  });
+
+  return {
+    startTime: new Date(resolvedStartTime).toISOString(),
+    endTime: new Date(resolvedEndTime).toISOString(),
+    maxResults: resolvedMaxResults,
+    results: results.map(r => ({
+      url: r.url,
+      title: r.title,
+      lastVisit: new Date(r.lastVisitTime).toISOString(),
+      visitCount: r.visitCount
+    }))
+  };
 }
 
 /**

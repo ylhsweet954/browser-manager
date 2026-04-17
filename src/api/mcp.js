@@ -135,6 +135,28 @@ export async function listMcpTools(url, headers = {}) {
 }
 
 /**
+ * Fetch available resources from an MCP server.
+ * @param {string} url - server endpoint
+ * @param {Object} headers - custom headers
+ * @returns {Promise<Array<{name: string, uri: string, description?: string, mimeType?: string}>>}
+ */
+export async function listMcpResources(url, headers = {}) {
+  const result = await rpcCall(url, headers, "resources/list");
+  return result.resources || [];
+}
+
+/**
+ * Read a resource from an MCP server.
+ * @param {string} url - server endpoint
+ * @param {Object} headers - custom headers
+ * @param {string} uri - resource URI
+ * @returns {Promise<Object>} raw MCP resource read result
+ */
+export async function readMcpResource(url, headers = {}, uri) {
+  return await rpcCall(url, headers, "resources/read", { uri });
+}
+
+/**
  * Call a tool on an MCP server.
  * @param {string} url - server endpoint
  * @param {Object} headers - custom headers

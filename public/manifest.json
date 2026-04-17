@@ -19,6 +19,7 @@
         "tabGroups",
         "tabs",
         "webNavigation",
+        "alarms",
         "unlimitedStorage",
         "sidePanel",
         "history",

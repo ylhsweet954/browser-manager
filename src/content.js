@@ -4,6 +4,8 @@ const TEXT_LIMIT = 500;
 const HTML_LIMIT = 4000;
 const HIGHLIGHT_STYLE_ID = "__tab_manager_highlight_style__";
 const HIGHLIGHT_OVERLAY_ID = "__tab_manager_highlight_overlay__";
+const REUSE_PROMPT_STYLE_ID = "__tab_manager_reuse_prompt_style__";
+const REUSE_PROMPT_ID = "__tab_manager_reuse_prompt__";
 let highlightTimerId = null;
 
 function truncateText(text, maxLength = TEXT_LIMIT) {
@@ -204,6 +206,217 @@ function clearHighlightOverlay() {
     highlightTimerId = null;
   }
   document.getElementById(HIGHLIGHT_OVERLAY_ID)?.remove();
+}
+
+function ensureReusePromptStyles() {
+  if (document.getElementById(REUSE_PROMPT_STYLE_ID)) return;
+
+  const style = document.createElement("style");
+  style.id = REUSE_PROMPT_STYLE_ID;
+  style.textContent = `
+    #${REUSE_PROMPT_ID} {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: min(380px, calc(100vw - 24px));
+      z-index: 2147483647;
+      background: #fffdf5;
+      border: 2px solid #111827;
+      border-radius: 14px;
+      box-shadow: 8px 8px 0 rgba(17, 24, 39, 0.16);
+      color: #111827;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #${REUSE_PROMPT_ID} * {
+      box-sizing: border-box;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-header {
+      padding: 14px 16px 10px;
+      background: linear-gradient(135deg, #fde68a 0%, #fef3c7 100%);
+      border-bottom: 1px solid #f59e0b;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-body {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-card {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      background: #ffffff;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #92400e;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-title {
+      font-weight: 600;
+      word-break: break-word;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-url {
+      margin-top: 4px;
+      color: #6b7280;
+      word-break: break-all;
+      font-size: 12px;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-domain {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      font-size: 12px;
+      color: #92400e;
+      font-weight: 600;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-remember {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #374151;
+      margin-top: 2px;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    #${REUSE_PROMPT_ID} button {
+      appearance: none;
+      border: 1px solid #111827;
+      border-radius: 10px;
+      padding: 10px 12px;
+      min-height: 40px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+    #${REUSE_PROMPT_ID} button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 0 rgba(17, 24, 39, 0.12);
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-btn-primary {
+      flex: 1;
+      background: #f59e0b;
+      color: #111827;
+    }
+    #${REUSE_PROMPT_ID} .tm-reuse-btn-secondary {
+      flex: 1;
+      background: #ffffff;
+      color: #111827;
+    }
+  `;
+  document.documentElement.appendChild(style);
+}
+
+function removeReusePrompt() {
+  document.getElementById(REUSE_PROMPT_ID)?.remove();
+}
+
+function createReusePromptRow(label, title, url) {
+  const card = document.createElement("div");
+  card.className = "tm-reuse-card";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "tm-reuse-label";
+  labelEl.textContent = label;
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "tm-reuse-title";
+  titleEl.textContent = truncateText(title || url || "", 200);
+
+  const urlEl = document.createElement("div");
+  urlEl.className = "tm-reuse-url";
+  urlEl.textContent = truncateText(url || "", 500);
+
+  card.append(labelEl, titleEl, urlEl);
+  return card;
+}
+
+function handleShowTabReusePrompt(msg, sendResponse) {
+  ensureReusePromptStyles();
+  removeReusePrompt();
+
+  const overlay = document.createElement("div");
+  overlay.id = REUSE_PROMPT_ID;
+
+  const header = document.createElement("div");
+  header.className = "tm-reuse-header";
+  header.textContent = "检测到已打开的相同页面";
+
+  const body = document.createElement("div");
+  body.className = "tm-reuse-body";
+
+  const description = document.createElement("div");
+  description.textContent = "要复用这个历史 Tab 吗？如果不复用，我们会切回刚打开的新页面。";
+
+  const domain = document.createElement("div");
+  domain.className = "tm-reuse-domain";
+  domain.textContent = `域名：${msg.domainKey || "未知"}`;
+
+  const existingRow = createReusePromptRow("已存在的页面", msg.existingTitle, msg.existingUrl);
+  const newRow = createReusePromptRow("刚打开的新页面", msg.newTitle, msg.newUrl);
+
+  const rememberLabel = document.createElement("label");
+  rememberLabel.className = "tm-reuse-remember";
+
+  const rememberCheckbox = document.createElement("input");
+  rememberCheckbox.type = "checkbox";
+
+  const rememberText = document.createElement("span");
+  rememberText.textContent = "记住当前域名的选择";
+  rememberLabel.append(rememberCheckbox, rememberText);
+
+  const actions = document.createElement("div");
+  actions.className = "tm-reuse-actions";
+
+  const reuseButton = document.createElement("button");
+  reuseButton.type = "button";
+  reuseButton.className = "tm-reuse-btn-primary";
+  reuseButton.textContent = "复用历史 Tab";
+
+  const keepButton = document.createElement("button");
+  keepButton.type = "button";
+  keepButton.className = "tm-reuse-btn-secondary";
+  keepButton.textContent = "不复用";
+
+  const submitDecision = (decision) => {
+    chrome.runtime.sendMessage({
+      type: "tab_reuse_prompt_decision",
+      decision,
+      rememberChoice: rememberCheckbox.checked,
+      newTabId: msg.newTabId,
+      existingTabId: msg.existingTabId,
+      domainKey: msg.domainKey || ""
+    }, () => {
+      removeReusePrompt();
+    });
+  };
+
+  reuseButton.addEventListener("click", () => submitDecision("reuse"));
+  keepButton.addEventListener("click", () => submitDecision("keep"));
+
+  actions.append(reuseButton, keepButton);
+  body.append(description, domain, existingRow, newRow, rememberLabel, actions);
+  overlay.append(header, body);
+  document.documentElement.appendChild(overlay);
+
+  sendResponse({ success: true });
 }
 
 function showHighlightOverlay(element, durationMs) {
@@ -461,6 +674,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "dom_highlight") {
     handleDomHighlight(msg, sendResponse);
     return true;
+  }
+
+  if (msg.type === "show_tab_reuse_prompt") {
+    handleShowTabReusePrompt(msg, sendResponse);
+    return false;
   }
 
   return false;

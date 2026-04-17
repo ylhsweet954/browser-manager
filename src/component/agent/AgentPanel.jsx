@@ -2,15 +2,14 @@
 import { Button, Card } from "@sunwu51/camel-ui";
 import { useEffect, useRef, useState } from "react";
 import { streamChat, executeTool } from "../../api/llm";
+import { connectMcpServer, listMcpResources, readMcpResource } from "../../api/mcp";
 import { generateSessionId, listSessions, createSession, loadSession, saveSession, deleteSession, extractTitle } from "../../api/sessions";
 import {
   EMPTY_AGENT_SKILLS,
   buildSkillsSystemPrompt,
-  isLikelyShellMcpTool,
   loadAgentSkills,
   saveAgentSkills,
-  mergeAgentSkillsRootPath,
-  mergeSelectedSkillTools,
+  mergeAgentSkillsServerUrl,
   mergeLoadedSkills
 } from "../../api/skills";
 import ChatMessage from "./ChatMessage";
@@ -36,6 +35,7 @@ export default function AgentPanel() {
   const [mcpTools, setMcpTools] = useState([]);   // MCP tools from connected servers
   const [agentSkills, setAgentSkills] = useState(EMPTY_AGENT_SKILLS);
   const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillStationTools, setSkillStationTools] = useState([]);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const historyRef = useRef(null);
@@ -82,7 +82,16 @@ export default function AgentPanel() {
 
   useEffect(() => {
     (async () => {
-      setAgentSkills(await loadAgentSkills());
+      const savedSkills = await loadAgentSkills();
+      setAgentSkills(savedSkills);
+      if (savedSkills.serverUrl) {
+        try {
+          setSkillStationTools(await loadSkillStationTools(savedSkills.serverUrl));
+        } catch (error) {
+          console.error("Failed to restore skill-station tools:", error);
+          setSkillStationTools([]);
+        }
+      }
     })();
   }, []);
 
@@ -98,6 +107,8 @@ export default function AgentPanel() {
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [showHistory]);
+
+  const combinedMcpTools = mergeMcpToolLists(mcpTools, skillStationTools);
 
   /**
    * Save current session to storage.
@@ -243,7 +254,7 @@ export default function AgentPanel() {
       };
     }
     if (toolName?.startsWith("mcp_")) {
-      const mcpTool = mcpTools.find(tool => tool._toolCallName === toolName);
+      const mcpTool = combinedMcpTools.find(tool => tool._toolCallName === toolName);
       if (mcpTool?._dangerous) {
         return {
           title: "危险 MCP 工具待确认",
@@ -377,52 +388,32 @@ export default function AgentPanel() {
     return llmConfig;
   }
 
-  function handleSkillsRootPathChange(rootPath) {
+  function handleSkillsServerUrlChange(serverUrl) {
     setAgentSkills(prev => {
-      const next = mergeAgentSkillsRootPath(prev, rootPath);
+      const next = mergeAgentSkillsServerUrl(prev, serverUrl);
       void saveAgentSkills(next);
       return next;
     });
+    setSkillStationTools([]);
   }
 
-  function handleSkillsToolSelectionChange(selectedToolNames) {
-    setAgentSkills(prev => {
-      const next = mergeSelectedSkillTools(prev, selectedToolNames);
-      void saveAgentSkills(next);
-      return next;
-    });
-  }
-
-  async function handleLoadSkills(rootPathInput) {
-    const rootPath = String(rootPathInput || agentSkills.rootPath || "").trim();
-    if (!rootPath) {
-      toast.error("请先填写 Skills 根目录");
-      return;
-    }
-
-    const config = await getLLMConfig();
-    if (!config.apiKey || !config.baseUrl) {
-      toast.error("请先在设置中配置 LLM API");
-      return;
-    }
-
-    const selectedMcpTools = mcpTools.filter(tool => agentSkills.selectedToolNames.includes(tool._toolCallName));
-    if (selectedMcpTools.length === 0) {
-      toast.error("请先在 Skills 面板勾选至少一个用于加载的 MCP 工具");
-      return;
-    }
-
-    if (!selectedMcpTools.some(isLikelyShellMcpTool)) {
-      toast.error("请至少勾选一个 Shell 工具，否则无法引入 skill");
+  async function handleLoadSkills(serverUrlInput) {
+    const serverUrl = String(serverUrlInput || agentSkills.serverUrl || "").trim();
+    if (!serverUrl) {
+      toast.error("请先填写 skill-station 地址");
       return;
     }
 
     setSkillsLoading(true);
     try {
-      const loadedSkills = await loadSkillsIndexViaMcp(config, rootPath, selectedMcpTools);
-      const next = mergeLoadedSkills(agentSkills, rootPath, loadedSkills);
+      const [loadedSkills, loadedTools] = await Promise.all([
+        loadSkillsIndexFromSkillStation(serverUrl),
+        loadSkillStationTools(serverUrl)
+      ]);
+      const next = mergeLoadedSkills(agentSkills, serverUrl, loadedSkills);
       const saved = await saveAgentSkills(next);
       setAgentSkills(saved);
+      setSkillStationTools(loadedTools);
       toast.success(`已加载 ${saved.skills.length} 个 skill`);
     } catch (error) {
       console.error("Failed to load skills index:", error);
@@ -430,68 +421,6 @@ export default function AgentPanel() {
     } finally {
       setSkillsLoading(false);
     }
-  }
-
-  async function loadSkillsIndexViaMcp(config, rootPath, availableMcpTools) {
-    const responseText = await runBackgroundToolTask(
-      config,
-      buildSkillsLoadSystemPrompt(rootPath),
-      buildSkillsLoadUserPrompt(rootPath),
-      availableMcpTools
-    );
-
-    return parseLoadedSkillsResponse(responseText);
-  }
-
-  async function runBackgroundToolTask(config, systemPrompt, userPrompt, availableMcpTools) {
-    let conversationMessages = [{ role: "user", content: userPrompt }];
-
-    for (let round = 0; round < 12; round += 1) {
-      const apiConversationMessages = buildApiMessages(config.apiType, conversationMessages);
-      const fullMessages = [{ role: "system", content: systemPrompt }, ...apiConversationMessages];
-      const turn = await streamBackgroundTurn(config, fullMessages, availableMcpTools);
-
-      if (!turn.msg.toolCalls || turn.msg.toolCalls.length === 0) {
-        return extractBackgroundResponseText(turn.text, turn.msg);
-      }
-
-      const toolResults = [];
-      for (const toolCall of turn.msg.toolCalls) {
-        if (!toolCall.name?.startsWith("mcp_")) {
-          throw new Error(`Skills Load 只支持 MCP 工具，当前模型尝试调用 ${toolCall.name}`);
-        }
-        const result = await executeTool(toolCall.name, toolCall.args, availableMcpTools);
-        toolResults.push({
-          id: toolCall.id,
-          name: toolCall.name,
-          args: toolCall.args,
-          result
-        });
-      }
-
-      conversationMessages = [
-        ...conversationMessages,
-        buildAssistantToolCallMessage(config.apiType, turn.text, turn.msg),
-        ...buildToolResultMessages(toolResults)
-      ];
-    }
-
-    throw new Error("Skills 加载超过最大工具调用轮次");
-  }
-
-  async function streamBackgroundTurn(config, messages, availableMcpTools) {
-    return await new Promise((resolve, reject) => {
-      let fullText = "";
-      streamChat(config, messages, {
-        onText: (chunk) => {
-          fullText += chunk;
-        },
-        onDone: (msg) => {
-          resolve({ text: fullText, msg });
-        },
-        onError: reject
-      }, availableMcpTools, { includeBuiltins: false });
-    });
   }
 
   async function sendMessage() {
@@ -578,10 +507,10 @@ export default function AgentPanel() {
                 result = { error: "Execution canceled by user", cancelled: true };
               } else {
                 setSessionRuntime(targetSessionId, { loading: true, pendingApproval: null });
-                result = await executeTool(tc.name, dangerousMeta.executeArgs ?? tc.args, mcpTools);
+                result = await executeTool(tc.name, dangerousMeta.executeArgs ?? tc.args, combinedMcpTools);
               }
             } else {
-              result = await executeTool(tc.name, tc.args, mcpTools);
+              result = await executeTool(tc.name, tc.args, combinedMcpTools);
             }
             if (!isCurrentRun(targetSessionId, runId)) return;
             toolResults.push({ id: tc.id, name: tc.name, args: tc.args, result });
@@ -617,7 +546,7 @@ export default function AgentPanel() {
         toast.error(`LLM 错误: ${err.message}`);
         setSessionRuntime(targetSessionId, { loading: false, abort: null });
       }
-    }, mcpTools);
+    }, combinedMcpTools);
 
     if (!isCurrentRun(targetSessionId, runId)) {
       abort();
@@ -768,9 +697,8 @@ export default function AgentPanel() {
           <SkillsConfig
             agentSkills={agentSkills}
             loading={skillsLoading}
-            mcpTools={mcpTools}
-            onRootPathChange={handleSkillsRootPathChange}
-            onSelectedToolNamesChange={handleSkillsToolSelectionChange}
+            skillToolConnected={skillStationTools.length > 0}
+            onServerUrlChange={handleSkillsServerUrlChange}
             onLoad={handleLoadSkills}
           />
           <McpConfig onToolsChanged={setMcpTools} />
@@ -1065,42 +993,20 @@ function buildApiMessages(apiType, messages) {
   return buildOpenAIApiMessages(messages);
 }
 
-function buildSkillsLoadSystemPrompt(rootPath) {
-  return (
-    `You are indexing local Codex skills through MCP tools.\n` +
-    `The target local skills root path is ${JSON.stringify(rootPath)}.\n` +
-    `Your job is to build a compact index of descendant SKILL.md files under that root.\n\n` +
-    `Rules:\n` +
-    `- Use only the MCP tools provided for this task. They were explicitly selected by the user for skill loading.\n` +
-    `- Prefer MCP file listing and file reading tools over shell tools.\n` +
-    `- Use shell tools only if dedicated file tools are unavailable.\n` +
-    `- Recursively locate files named SKILL.md or skill.md under the root path.\n` +
-    `- Read only enough content from each SKILL.md to extract header information such as frontmatter name and description, plus minimal leading text if needed.\n` +
-    `- Do not read unrelated large files.\n` +
-    `- Return ONLY JSON with this exact shape: {"skills":[{"path":"relative/path/SKILL.md","name":"...","description":"...","header":{"name":"...","description":"..."}}]}\n` +
-    `- Paths must be relative to the root path.\n` +
-    `- If you cannot complete the task with the available tools, return ONLY JSON as {"error":"reason"}.\n`
-  );
-}
-
-function buildSkillsLoadUserPrompt(rootPath) {
-  return (
-    `Load the skills index for ${rootPath}.\n` +
-    `Find every descendant SKILL.md, extract only summary fields, and return strict JSON only.`
-  );
-}
-
-function extractBackgroundResponseText(streamedText, doneMsg) {
-  if (streamedText && streamedText.trim()) return streamedText.trim();
-  if (typeof doneMsg?.content === "string") return doneMsg.content.trim();
-  if (Array.isArray(doneMsg?.content)) {
-    return doneMsg.content
-      .filter(block => block?.type === "text" && typeof block.text === "string")
-      .map(block => block.text)
-      .join("")
-      .trim();
+async function loadSkillsIndexFromSkillStation(serverUrl) {
+  const normalizedServerUrl = normalizeSkillStationUrl(serverUrl);
+  const connection = await connectMcpServer(normalizedServerUrl, {});
+  if (connection.error) {
+    throw new Error(connection.error);
   }
-  return "";
+  const resources = await listMcpResources(normalizedServerUrl);
+  const skillsIndex = resources.find(resource => resource?.uri === "skills://index");
+  if (!skillsIndex) {
+    throw new Error("skill-station 未暴露 skills://index 资源");
+  }
+
+  const resourceResult = await readMcpResource(normalizedServerUrl, {}, "skills://index");
+  return parseLoadedSkillsResponse(extractResourceText(resourceResult));
 }
 
 function parseLoadedSkillsResponse(text) {
@@ -1127,12 +1033,65 @@ function parseLoadedSkillsResponse(text) {
 
   return rawSkills
     .map(skill => ({
-      path: String(skill?.path || "").trim().replace(/\\/g, "/").replace(/^\.?\//, ""),
+      path: String(skill?.directoryName || skill?.path || "").trim().replace(/\\/g, "/").replace(/^\.?\//, ""),
       name: String(skill?.name || "").trim(),
       description: String(skill?.description || "").trim(),
-      header: skill?.header && typeof skill.header === "object" ? skill.header : {}
+      header: {
+        ...(skill?.metadata && typeof skill.metadata === "object" ? skill.metadata : {}),
+        ...(skill?.header && typeof skill.header === "object" ? skill.header : {})
+      }
     }))
     .filter(skill => !!skill.path);
+}
+
+async function loadSkillStationTools(serverUrl) {
+  const normalizedServerUrl = normalizeSkillStationUrl(serverUrl);
+  const result = await connectMcpServer(normalizedServerUrl, {});
+  if (result.error) {
+    throw new Error(result.error);
+  }
+
+  const tools = Array.isArray(result.tools) ? result.tools : [];
+  const hasGetSkillDetail = tools.some(tool => tool?.name === "get_skill_detail");
+  if (!hasGetSkillDetail) {
+    throw new Error("skill-station 缺少 get_skill_detail 工具");
+  }
+
+  return tools.map(tool => ({
+    ...tool,
+    _serverId: "skill_station",
+    _serverName: "skill_station",
+    _serverUrl: normalizedServerUrl,
+    _serverHeaders: {},
+    _dangerous: false,
+    _toolCallName: `mcp_skill_station_${tool.name}`
+  }));
+}
+
+function normalizeSkillStationUrl(serverUrl) {
+  return String(serverUrl || "").trim();
+}
+
+function extractResourceText(resourceResult) {
+  const contents = Array.isArray(resourceResult?.contents) ? resourceResult.contents : [];
+  const texts = contents
+    .map(item => item?.text)
+    .filter(text => typeof text === "string" && text.trim().length > 0);
+
+  if (texts.length === 0) {
+    throw new Error("skills://index 返回为空");
+  }
+
+  return texts.join("\n");
+}
+
+function mergeMcpToolLists(primaryTools, secondaryTools) {
+  const map = new Map();
+  for (const tool of [...(primaryTools || []), ...(secondaryTools || [])]) {
+    if (!tool?._toolCallName) continue;
+    map.set(tool._toolCallName, tool);
+  }
+  return [...map.values()];
 }
 
 function extractJsonPayload(text) {

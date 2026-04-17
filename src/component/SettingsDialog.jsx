@@ -1,6 +1,7 @@
 /* global chrome */
 import { Button, Checkbox, Dialog, Input, Select } from "@sunwu51/camel-ui";
 import { useEffect, useRef, useState } from "react";
+import { clearReuseDomainPolicies, getReuseDomainPolicies } from "../api/tabReuse";
 
 /**
  * Settings dialog for LLM API configuration, tab reuse, and auto-suspend.
@@ -15,6 +16,7 @@ export default function SettingsDialog() {
   let [suspendTimeout, setSuspendTimeout] = useState(0);
   let [mcpToolTimeoutSeconds, setMcpToolTimeoutSeconds] = useState(60);
   let [reuse, setReuse] = useState(false);
+  let [reusePolicyCount, setReusePolicyCount] = useState(0);
   const loaded = useRef(false);
   const suspendOptions = [
     { label: "关闭", value: 0 },
@@ -41,6 +43,10 @@ export default function SettingsDialog() {
       setReuse(res.reuse);
       loaded.current = true;
     });
+
+    getReuseDomainPolicies().then((policies) => {
+      setReusePolicyCount(Object.keys(policies || {}).length);
+    });
   }, [])
 
   /** Auto-save whenever any setting changes */
@@ -53,6 +59,11 @@ export default function SettingsDialog() {
       reuse
     });
   }, [apiType, baseUrl, apiKey, model, suspendTimeout, mcpToolTimeoutSeconds, reuse])
+
+  async function handleClearReusePolicies() {
+    await clearReuseDomainPolicies();
+    setReusePolicyCount(0);
+  }
 
   return (
     <>
@@ -147,8 +158,18 @@ export default function SettingsDialog() {
         />
         <div className="mt-2">
           <Checkbox isSelected={reuse} onChange={setReuse}>
-            <span className="text-sm">复用 Tab（打开已存在的 URL 时切换到已有标签页）</span>
+            <span className="text-sm">复用 Tab（命中已存在页面时优先询问是否复用，并可记住域名选择）</span>
           </Checkbox>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-xs text-gray-500">已记住 {reusePolicyCount} 个域名的复用决策</span>
+          <Button
+            className="!min-h-6 !px-2 !text-xs"
+            disabled={reusePolicyCount === 0}
+            onClick={handleClearReusePolicies}
+          >
+            清除域名记忆
+          </Button>
         </div>
       </Dialog>
     </>

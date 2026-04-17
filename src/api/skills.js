@@ -3,9 +3,8 @@
 const STORAGE_KEY = "agentSkills";
 
 export const EMPTY_AGENT_SKILLS = {
-  rootPath: "",
+  serverUrl: "",
   loadedAt: 0,
-  selectedToolNames: [],
   skills: []
 };
 
@@ -22,21 +21,21 @@ export async function saveAgentSkills(agentSkills) {
 
 export function buildSkillsSystemPrompt(agentSkills) {
   const normalized = normalizeAgentSkills(agentSkills);
-  if (!normalized.rootPath) {
+  if (!normalized.serverUrl) {
     return "";
   }
 
   if (normalized.skills.length === 0) {
     return (
-      `\n\nLocal skills root:\n` +
-      `- The user configured the local skills root path ${JSON.stringify(normalized.rootPath)}.\n` +
-      `- Skills headers have not been loaded yet.\n` +
-      `- When a task requires local skills, use the configured MCP file or shell tools to inspect this path, locate SKILL.md files, read the relevant skill instructions, and then follow any referenced scripts or sibling files under the same root.`
+      `\n\nSkills via skill-station:\n` +
+      `- The user configured the skill-station MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
+      `- Skills index has not been loaded yet.\n` +
+      `- When skill details are needed, use the MCP tool mcp_skill_station_get_skill_detail (the wrapped MCP tool for get_skill_detail).\n`
     );
   }
 
   const lines = normalized.skills.map(skill => {
-    const parts = [`path=${JSON.stringify(skill.path)}`];
+    const parts = [`directoryName=${JSON.stringify(skill.path)}`];
     if (skill.name) parts.push(`name=${JSON.stringify(skill.name)}`);
     if (skill.description) parts.push(`description=${JSON.stringify(skill.description)}`);
     for (const [key, value] of Object.entries(skill.header || {})) {
@@ -47,20 +46,18 @@ export function buildSkillsSystemPrompt(agentSkills) {
   });
 
   return (
-    `\n\nLocal skills root:\n` +
-    `- The user configured the local skills root path ${JSON.stringify(normalized.rootPath)}.\n` +
-    `- The following entries are indexed summaries extracted from descendant SKILL.md files under that root:\n` +
+    `\n\nSkills via skill-station:\n` +
+    `- The user configured the skill-station MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
+    `- The following entries are indexed summaries loaded from the MCP resource skills://index:\n` +
     `${lines.join("\n")}\n` +
-    `- When a task matches one of these skills, use the configured MCP file or shell tools to read the full SKILL.md at the corresponding path under ${JSON.stringify(normalized.rootPath)}.\n` +
-    `- After reading the full skill, also inspect and use any referenced scripts, references, assets, or sibling files under the same skills root as needed.\n` +
-    `- Do not rely on the summary alone when the task depends on the actual skill workflow.`
+    `- When a task matches one of these skills, use the MCP tool mcp_skill_station_get_skill_detail with the skill directory name to read the full SKILL.md.\n` +
+    `- Do not rely on the summary alone when the task depends on the actual skill workflow.\n`
   );
 }
 
 export function normalizeAgentSkills(agentSkills) {
-  const rootPath = normalizeRootPath(agentSkills?.rootPath || agentSkills?.rootName || "");
+  const serverUrl = normalizeServerUrl(agentSkills?.serverUrl || agentSkills?.rootPath || agentSkills?.rootName || "");
   const loadedAt = Number(agentSkills?.loadedAt || agentSkills?.scannedAt) || 0;
-  const selectedToolNames = normalizeSelectedToolNames(agentSkills?.selectedToolNames);
   const rawSkills = Array.isArray(agentSkills?.skills) ? agentSkills.skills : [];
 
   const skills = rawSkills
@@ -74,48 +71,28 @@ export function normalizeAgentSkills(agentSkills) {
     .sort((left, right) => left.path.localeCompare(right.path));
 
   return {
-    rootPath,
+    serverUrl,
     loadedAt,
-    selectedToolNames,
     skills
   };
 }
 
-export function mergeAgentSkillsRootPath(agentSkills, rootPath) {
+export function mergeAgentSkillsServerUrl(agentSkills, serverUrl) {
   const normalizedCurrent = normalizeAgentSkills(agentSkills);
-  const normalizedRootPath = normalizeRootPath(rootPath);
+  const normalizedServerUrl = normalizeServerUrl(serverUrl);
   return normalizeAgentSkills({
-    rootPath: normalizedRootPath,
-    loadedAt: normalizedCurrent.rootPath === normalizedRootPath ? normalizedCurrent.loadedAt : 0,
-    selectedToolNames: normalizedCurrent.selectedToolNames,
-    skills: normalizedCurrent.rootPath === normalizedRootPath ? normalizedCurrent.skills : []
+    serverUrl: normalizedServerUrl,
+    loadedAt: normalizedCurrent.serverUrl === normalizedServerUrl ? normalizedCurrent.loadedAt : 0,
+    skills: normalizedCurrent.serverUrl === normalizedServerUrl ? normalizedCurrent.skills : []
   });
 }
 
-export function mergeSelectedSkillTools(agentSkills, selectedToolNames) {
-  const normalizedCurrent = normalizeAgentSkills(agentSkills);
+export function mergeLoadedSkills(_agentSkills, serverUrl, skills) {
   return normalizeAgentSkills({
-    ...normalizedCurrent,
-    selectedToolNames
-  });
-}
-
-export function mergeLoadedSkills(_agentSkills, rootPath, skills) {
-  return normalizeAgentSkills({
-    rootPath,
+    serverUrl,
     loadedAt: Date.now(),
-    selectedToolNames: normalizeAgentSkills(_agentSkills).selectedToolNames,
     skills
   });
-}
-
-export function isLikelyShellMcpTool(tool) {
-  const haystack = [tool?.name, tool?.description, tool?._serverName, tool?._toolCallName]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  return /\b(shell|bash|sh|zsh|terminal|command|commands|exec|execute|pty|process|spawn|run)\b/.test(haystack);
 }
 
 function normalizeHeader(header) {
@@ -128,19 +105,10 @@ function normalizeHeader(header) {
   return normalized;
 }
 
-function normalizeRootPath(rootPath) {
-  return String(rootPath || "").trim().replace(/[\\/]+$/, "");
+function normalizeServerUrl(serverUrl) {
+  return String(serverUrl || "").trim().replace(/\s+/g, "");
 }
 
 function normalizeRelativePath(path) {
   return String(path || "").trim().replace(/\\/g, "/").replace(/^\.?\//, "");
-}
-
-function normalizeSelectedToolNames(selectedToolNames) {
-  if (!Array.isArray(selectedToolNames)) return [];
-  return [...new Set(
-    selectedToolNames
-      .map(name => String(name || "").trim())
-      .filter(Boolean)
-  )].sort((left, right) => left.localeCompare(right));
 }
