@@ -23,6 +23,22 @@ export default function McpConfig({ onToolsChanged }) {
   const [connecting, setConnecting] = useState(false);
   const [expandedServers, setExpandedServers] = useState({});
   const overLimitRef = useRef(false);
+  const dialogBodyRef = useRef(null);
+
+  function focusServerNameInput(container = dialogBodyRef.current) {
+    if (!container) return;
+    requestAnimationFrame(() => {
+      const input = container.querySelector('input[placeholder="my_server"]') || container.querySelector("input");
+      input?.focus();
+    });
+  }
+
+  function handleDialogBodyRef(node) {
+    dialogBodyRef.current = node;
+    if (node) {
+      focusServerNameInput(node);
+    }
+  }
 
   function normalizeServerName(name) {
     const trimmed = String(name || "").trim();
@@ -253,6 +269,7 @@ export default function McpConfig({ onToolsChanged }) {
       </Button>
     }>
       <div
+        ref={handleDialogBodyRef}
         style={{
           width: "min(720px, calc(100vw - 32px))",
           maxWidth: "100%",
@@ -340,6 +357,7 @@ export default function McpConfig({ onToolsChanged }) {
           label="名称"
           labelClassName="!text-xs !text-gray-500"
           inputClassName="!min-h-8"
+          autoFocus
           defaultValue={newName}
           onChange={setNewName}
           placeholder="my_server"

@@ -104,7 +104,12 @@ export default function Group() {
         <Card>
             <span className="text-sm text-gray-500 font-bold block mb-1">分组</span>
             <div className="flex gap-1 mb-2">
-                <Input inputClassName="!min-h-8 flex-1" onChange={setGroupRule} placeholder="分组名#url正则" />
+                <Input
+                    aria-label="分组规则"
+                    inputClassName="!min-h-8 flex-1"
+                    onChange={setGroupRule}
+                    placeholder="分组名#url正则"
+                />
                 <Button className="!text-xs !whitespace-nowrap flex-shrink-0" onPress={triggerGroup}>分组</Button>
             </div>
             <div className="flex gap-1 items-center">

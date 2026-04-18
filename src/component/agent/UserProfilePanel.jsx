@@ -1,5 +1,5 @@
 /* global chrome */
-import { Button, Dialog } from "@sunwu51/camel-ui";
+import { Button, Dialog, Switch } from "@sunwu51/camel-ui";
 import { useState, useCallback, useEffect } from "react";
 import {
   getProfileSummary,
@@ -37,8 +37,7 @@ export default function UserProfilePanel() {
     setAnalyzing(false);
   }
 
-  async function handleToggle() {
-    const next = !enabled;
+  async function handleToggle(next) {
     await setProfileEnabled(next);
     setEnabled(next);
     toast(next ? "画像注入已开启" : "画像注入已关闭", { duration: 2000 });
@@ -88,36 +87,18 @@ export default function UserProfilePanel() {
             </button>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span className="text-xs text-gray-500">{enabled ? "已开启" : "已关闭"}</span>
-            <button
-              onClick={handleToggle}
-              style={{
-                width: "36px",
-                height: "20px",
-                borderRadius: "10px",
-                border: "none",
-                cursor: "pointer",
-                background: enabled ? "#4ade80" : "#d1d5db",
-                position: "relative",
-                transition: "background 0.2s",
-                flexShrink: 0,
-              }}
-              title={enabled ? "点击关闭画像注入" : "点击开启画像注入"}
+            <Switch
+              isSelected={enabled}
+              onChange={handleToggle}
+              round
+              aria-label={enabled ? "关闭画像注入" : "开启画像注入"}
+              className="!text-xs"
+              style={{ flexShrink: 0, display: "inline-flex", alignItems: "center" }}
             >
-              <span
-                style={{
-                  position: "absolute",
-                  top: "2px",
-                  left: enabled ? "18px" : "2px",
-                  width: "16px",
-                  height: "16px",
-                  borderRadius: "50%",
-                  background: "white",
-                  transition: "left 0.2s",
-                  boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                }}
-              />
-            </button>
+              <span className="text-xs text-gray-500" style={{ display: "inline-flex", alignItems: "center", minHeight: "24px" }}>
+                {enabled ? "已开启" : "已关闭"}
+              </span>
+            </Switch>
           </div>
         </div>
 

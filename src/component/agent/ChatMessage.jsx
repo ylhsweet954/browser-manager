@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { Button, Dialog } from "@sunwu51/camel-ui";
 import { useState } from "react";
 
 /**
@@ -23,18 +24,32 @@ export default function ChatMessage({ msg, messageIndex, onRewindToUserMessage }
       <div className="chat-msg chat-msg-user">
         <div className="chat-msg-user-inner">
           {showRewind && (
-            <button
-              type="button"
-              className="chat-user-rewind-btn"
-              title="回退到此消息（之后记录清除，内容填入输入框）"
-              aria-label="回退到此消息"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRewindToUserMessage(messageIndex);
-              }}
+            <Dialog
+              trigger={
+                <button
+                  type="button"
+                  className="chat-user-rewind-btn"
+                  title="回退到此消息"
+                  aria-label="回退到此消息"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  ↩
+                </button>
+              }
             >
-              ↩
-            </button>
+              <div className="text-sm font-semibold text-gray-600 mb-2">回退到此消息</div>
+              <div className="text-xs text-gray-500 mb-3">回退到这条消息后，之后的消息会被删除。</div>
+              <div className="flex justify-end">
+                <Button
+                  className="!text-xs"
+                  onPress={() => onRewindToUserMessage(messageIndex)}
+                >
+                  确认回退
+                </Button>
+              </div>
+            </Dialog>
           )}
           <div className="chat-bubble chat-bubble-user">{content}</div>
         </div>

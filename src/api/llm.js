@@ -10,6 +10,11 @@ const DOM_LOCATOR_PROPERTIES = {
 };
 const DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS = 30;
 const DEFAULT_MCP_TOOL_TIMEOUT_SECONDS = 60;
+const SCHEDULE_STORAGE_KEY = "scheduledJobs";
+const SCHEDULE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const SCHEDULE_FIRE_ALARM_PREFIX = "schedule-fire:";
+const SCHEDULE_CLEANUP_ALARM_PREFIX = "schedule-cleanup:";
+const TERMINAL_SCHEDULE_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 // ==================== Tool Definitions ====================
 
@@ -331,32 +336,12 @@ const TOOLS = [
   {
     name: "tab_screenshot",
     description:
-      "Capture a screenshot of a browser tab. By default captures only the visible viewport using Chrome's captureVisibleTab (requires that tab to be active in its window). Set fullPage=true to stitch the full scroll height: read window.innerHeight, scroll to 0, capture, then for n=1,2,... scroll to (n*innerHeight), compare scrollY to n*innerHeight to detect the last clamped page; only the last tile crops the top so the bottom (n*innerHeight - scrollY) document pixels are kept. Tiles are aligned with no variable overlap between full pages. Captures are rate-limited for Chrome quota. Output is width-capped JPEG for readability. Stops early on maxScreens or canvas limits; check stoppedReason.",
+      "Capture a screenshot of a browser tab. By default captures only the visible viewport using Chrome's captureVisibleTab (requires that tab to be active in its window). Output is width-capped JPEG for readability.",
     schema: {
       type: "object",
       properties: {
         windowId: { type: "number", description: "Window ID passed to captureVisibleTab (default: the resolved tab's window)" },
-        tabId: { type: "number", description: "Optional tab to capture. When omitted, uses the active tab in the last-focused window. When set, that tab is activated before capture." },
-        fullPage: {
-          type: "boolean",
-          description: "If true, scroll-stitch the full scrollable height. Defaults to false (single viewport screenshot)."
-        },
-        overlapPx: {
-          type: "number",
-          description: "Ignored for fullPage (legacy). Full-page stitch uses fixed innerHeight-aligned pages."
-        },
-        maxScreens: {
-          type: "number",
-          description: "When fullPage is true: maximum number of viewport captures (default 40, max 100)."
-        },
-        settleMs: {
-          type: "number",
-          description: "When fullPage is true: milliseconds to wait after each scroll for layout/lazy-load (default 250, max 5000)."
-        },
-        maxStableBottomPasses: {
-          type: "number",
-          description: "Ignored for fullPage (legacy)."
-        }
+        tabId: { type: "number", description: "Optional tab to capture. When omitted, uses the active tab in the last-focused window. When set, that tab is activated before capture." }
       },
       required: []
     }
@@ -440,14 +425,14 @@ const TOOLS = [
   },
   {
     name: "schedule_tool",
-    description: "Schedule a tool call to execute at a future time. The toolName must be one of the available built-in tools or connected MCP tools. Provide EITHER delaySeconds (relative, preferred) OR timestamp (absolute). Example: schedule tab_open to open a URL in 5 minutes.",
+    description: "Schedule a tool call to execute at a future time. You MUST provide both toolName and toolArgs. toolName must be one of the available built-in tools or connected MCP tools. toolArgs must be a JSON object and must strictly match the input format required by the selected toolName. Provide EITHER delaySeconds (relative, preferred) OR timestamp (absolute). Example: schedule tab_open to open a URL in 5 minutes. Recommendation: because scheduled jobs run inside the Chrome host process, they will disappear and cannot execute after Chrome is closed, so avoid creating jobs too far in the future whenever possible.",
     schema: {
       type: "object",
       properties: {
         delaySeconds: { type: "number", description: "Seconds from now (e.g. 300 for 5 minutes). Preferred." },
         timestamp: { type: "number", description: "Absolute Unix timestamp in ms. Only if user gives exact datetime." },
         toolName: { type: "string", description: "Name of the tool to call (e.g. tab_open, tab_close, mcp__xxx)" },
-        toolArgs: { type: "object", description: "Arguments to pass to the tool" },
+        toolArgs: { type: "object", description: "Required JSON object of arguments for the selected toolName. The shape and field names must strictly match that tool's input schema." },
         label: { type: "string", description: "Short human-readable description of this scheduled task" },
         timeoutSeconds: { type: "number", description: `Maximum execution time after the schedule fires. Defaults to ${DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS} seconds.` }
       },
@@ -456,7 +441,7 @@ const TOOLS = [
   },
   {
     name: "list_scheduled",
-    description: "List all pending scheduled tool calls with their IDs, tool names, and fire times.",
+    description: "List all scheduled jobs that are pending, running, or completed within the last 24 hours, including their IDs, labels, planned fire times, and statuses.",
     schema: {
       type: "object",
       properties: {},
@@ -465,7 +450,7 @@ const TOOLS = [
   },
   {
     name: "cancel_scheduled",
-    description: "Cancel a pending scheduled tool call by its ID.",
+    description: "Cancel a pending scheduled tool call by its ID. Cancelled jobs remain visible with status=cancelled for 24 hours before cleanup.",
     schema: {
       type: "object",
       properties: {
@@ -473,10 +458,20 @@ const TOOLS = [
       },
       required: ["scheduleId"]
     }
+  },
+  {
+    name: "clear_completed_scheduled",
+    description: "Manually clear completed scheduled jobs, including succeeded, failed, and cancelled entries.",
+    schema: {
+      type: "object",
+      properties: {},
+      required: []
+    }
   }
 ];
 
 export const BUILTIN_TOOL_COUNT = TOOLS.length;
+export const BUILTIN_TOOL_NAMES = TOOLS.map(t => t.name);
 
 export function buildMcpToolCallName(serverName, toolName) {
   return `mcp_${serverName}_${toolName}`;
@@ -582,6 +577,7 @@ export async function executeTool(name, args, mcpRegistry = []) {
       case "schedule_tool": return await _execScheduleTool(args, mcpRegistry);
       case "list_scheduled": return _execListScheduled();
       case "cancel_scheduled": return _execCancelScheduled(args);
+      case "clear_completed_scheduled": return _execClearCompletedScheduled();
       default: return { error: `Unknown tool: ${name}` };
     }
   } catch (e) {
@@ -590,19 +586,6 @@ export async function executeTool(name, args, mcpRegistry = []) {
       hint: "The operation failed."
     };
   }
-}
-
-async function _executeToolWithTimeout(name, args, mcpRegistry, timeoutMs) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return await executeTool(name, args, mcpRegistry);
-  }
-
-  return await Promise.race([
-    executeTool(name, args, mcpRegistry),
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Tool execution timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
-    })
-  ]);
 }
 
 /**
@@ -1456,20 +1439,6 @@ async function _execEvalJs({ jsScript }) {
   const world = "MAIN";
   try {
     const runnerFunc = async (source) => {
-      function normalizeResult(value) {
-        if (value === undefined) return { kind: "undefined", value: null };
-        if (value === null) return null;
-        try {
-          const json = JSON.stringify(value);
-          if (json === undefined) {
-            return { kind: typeof value, value: String(value) };
-          }
-          return JSON.parse(json);
-        } catch (e) {
-          return { kind: typeof value, value: String(value) };
-        }
-      }
-
       const channel = `__tab_manager_eval_js_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       return await new Promise((resolve) => {
         let settled = false;
@@ -1954,6 +1923,8 @@ const FULL_PAGE_STITCH_DEBUG_BORDER = false;
  * Returns an optimized base64 image data URL.
  */
 async function _execTabScreenshot(args = {}) {
+  // TODO: Keep the internal fullPage stitching path for future use, but do not expose
+  // it to the model yet. The current full-page result quality still needs improvement.
   const {
     windowId,
     tabId,
@@ -2043,6 +2014,7 @@ async function _execTabScreenshot(args = {}) {
     const MIN_CAPTURE_GAP_MS = 650;
     let lastCaptureAtMs = 0;
 
+    // eslint-disable-next-line no-inner-declarations
     async function captureVisibleThrottled() {
       const now = Date.now();
       if (lastCaptureAtMs > 0) {
@@ -2359,114 +2331,194 @@ function _execGetCurrentTime() {
   };
 }
 
-// Scheduled tool calls registry (in-memory, survives within side panel session)
-const _scheduled = [];
+function _snapshotScheduleMcpRegistry(mcpRegistry = []) {
+  return (mcpRegistry || []).map(tool => ({
+    name: tool?.name,
+    _serverName: tool?._serverName,
+    _serverUrl: tool?._serverUrl,
+    _serverHeaders: tool?._serverHeaders || {},
+    _toolCallName: tool?._toolCallName || buildMcpToolCallName(tool?._serverName || "server", tool?.name)
+  })).filter(tool => tool.name && tool._toolCallName && tool._serverUrl);
+}
+
+function _isTerminalScheduledStatus(status) {
+  return TERMINAL_SCHEDULE_STATUSES.has(status);
+}
+
+function _buildScheduleFireAlarmName(scheduleId) {
+  return `${SCHEDULE_FIRE_ALARM_PREFIX}${scheduleId}`;
+}
+
+function _buildScheduleCleanupAlarmName(scheduleId) {
+  return `${SCHEDULE_CLEANUP_ALARM_PREFIX}${scheduleId}`;
+}
+
+async function _loadScheduledJobsFromStorage() {
+  const { [SCHEDULE_STORAGE_KEY]: jobs } = await chrome.storage.local.get({ [SCHEDULE_STORAGE_KEY]: [] });
+  return Array.isArray(jobs) ? jobs : [];
+}
+
+async function _saveScheduledJobsToStorage(jobs) {
+  await chrome.storage.local.set({ [SCHEDULE_STORAGE_KEY]: jobs });
+}
+
+async function _clearScheduledAlarms(scheduleId) {
+  if (!chrome.alarms) return;
+  await chrome.alarms.clear(_buildScheduleFireAlarmName(scheduleId));
+  await chrome.alarms.clear(_buildScheduleCleanupAlarmName(scheduleId));
+}
+
+function _serializeScheduledJob(job) {
+  const remainingSeconds = job.status === "pending"
+    ? Math.max(0, Math.round((job.fireTimestamp - Date.now()) / 1000))
+    : 0;
+
+  return {
+    id: job.id,
+    scheduleId: job.id,
+    label: job.label,
+    toolName: job.toolName,
+    toolArgs: job.toolArgs,
+    fireAt: new Date(job.fireTimestamp).toLocaleString(),
+    status: job.status,
+    remainingSeconds,
+    timeoutSeconds: Math.round((job.executeTimeoutMs || (DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS * 1000)) / 1000),
+    startedAt: job.startedAt ? new Date(job.startedAt).toLocaleString() : null,
+    finishedAt: job.finishedAt ? new Date(job.finishedAt).toLocaleString() : null,
+    error: job.error || null,
+    expiresAt: job.expiresAt ? new Date(job.expiresAt).toLocaleString() : null
+  };
+}
+
+async function _pruneExpiredScheduledJobsInStorage() {
+  const jobs = await _loadScheduledJobsFromStorage();
+  const now = Date.now();
+  const kept = [];
+
+  for (const job of jobs) {
+    if (_isTerminalScheduledStatus(job?.status) && Number.isFinite(job?.expiresAt) && job.expiresAt <= now) {
+      await _clearScheduledAlarms(job.id);
+      continue;
+    }
+    kept.push(job);
+  }
+
+  if (kept.length !== jobs.length) {
+    await _saveScheduledJobsToStorage(kept);
+  }
+
+  return kept;
+}
+
+async function _sendScheduleMessage(action, payload = {}) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "schedule_manager",
+      action,
+      payload
+    });
+    return response || { error: "No response from schedule manager" };
+  } catch (error) {
+    return { error: error?.message || String(error) };
+  }
+}
 
 /**
- * Schedule a tool call to execute at a future time.
- * Validates that toolName is a known built-in or MCP tool.
+ * Schedule a tool call to execute at a future time via the background service worker.
  */
 async function _execScheduleTool({ delaySeconds, timestamp, toolName, toolArgs, label, timeoutSeconds }, mcpRegistry) {
-  // Validate toolName exists
-  const builtinNames = TOOLS.map(t => t.name);
-  const mcpNames = (mcpRegistry || []).map(t =>
-    t._toolCallName || buildMcpToolCallName(t._serverName || "server", t.name)
-  );
-  const allNames = [...builtinNames, ...mcpNames];
-
-  if (!allNames.includes(toolName)) {
-    return { error: `Unknown tool: ${toolName}. Available: ${allNames.join(", ")}` };
-  }
-
-  const now = Date.now();
-  let delayMs, fireTimestamp;
-
-  if (delaySeconds != null && delaySeconds > 0) {
-    delayMs = delaySeconds * 1000;
-    fireTimestamp = now + delayMs;
-  } else if (timestamp != null) {
-    delayMs = timestamp - now;
-    fireTimestamp = timestamp;
-  } else {
-    return { error: "Please provide either delaySeconds or timestamp" };
-  }
-
-  if (delayMs < 0) return { error: "The specified time is in the past" };
-
-  const id = `sched_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const executeTimeoutMs = Math.max(
-    1,
-    Number(timeoutSeconds) || DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS
-  ) * 1000;
-
-  // Snapshot mcpRegistry at schedule time for MCP tool routing
-  const mcpSnapshot = (mcpRegistry || []).slice();
-
-  const timerId = setTimeout(async () => {
-    try {
-      await _executeToolWithTimeout(toolName, toolArgs, mcpSnapshot, executeTimeoutMs);
-    } catch (e) { /* silently skip if tool fails */ }
-    const idx = _scheduled.findIndex(s => s.id === id);
-    if (idx >= 0) _scheduled.splice(idx, 1);
-  }, delayMs);
-
-  _scheduled.push({
-    id,
-    timerId,
-    fireTimestamp,
+  return await _sendScheduleMessage("schedule", {
+    delaySeconds,
+    timestamp,
     toolName,
     toolArgs,
-    label: label || toolName,
-    executeTimeoutMs
+    label,
+    timeoutSeconds,
+    mcpRegistry: _snapshotScheduleMcpRegistry(mcpRegistry)
   });
+}
+
+/**
+ * List scheduled tool calls directly from storage to avoid MV3 service worker
+ * wake-up / response jitter in the schedule management UI.
+ */
+async function _execListScheduled() {
+  const jobs = await _pruneExpiredScheduledJobsInStorage();
+  if (jobs.length === 0) {
+    return { scheduled: [], message: "No scheduled tasks" };
+  }
 
   return {
-    success: true,
-    scheduleId: id,
-    toolName,
-    toolArgs,
-    label: label || toolName,
-    fireAt: new Date(fireTimestamp).toLocaleString(),
-    delaySeconds: Math.round(delayMs / 1000),
-    timeoutSeconds: Math.round(executeTimeoutMs / 1000)
+    scheduled: jobs
+      .slice()
+      .sort((a, b) => b.fireTimestamp - a.fireTimestamp)
+      .map(_serializeScheduledJob)
   };
 }
 
 /**
- * List all pending scheduled tool calls.
+ * Cancel a pending scheduled tool call directly in storage.
+ * The background service worker still owns creation and execution.
  */
-function _execListScheduled() {
-  if (_scheduled.length === 0) return { scheduled: [], message: "No pending scheduled tasks" };
-  return {
-    scheduled: _scheduled.map(s => ({
-      scheduleId: s.id,
-      label: s.label,
-      toolName: s.toolName,
-      toolArgs: s.toolArgs,
-      fireAt: new Date(s.fireTimestamp).toLocaleString(),
-      remainingSeconds: Math.max(0, Math.round((s.fireTimestamp - Date.now()) / 1000)),
-      timeoutSeconds: Math.round((s.executeTimeoutMs || (DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS * 1000)) / 1000)
-    }))
-  };
-}
+async function _execCancelScheduled({ scheduleId }) {
+  const jobs = await _pruneExpiredScheduledJobsInStorage();
+  const index = jobs.findIndex(job => job.id === scheduleId);
+  if (index < 0) {
+    return { error: `Schedule not found: ${scheduleId}` };
+  }
 
-/**
- * Cancel a pending scheduled tool call by its ID.
- */
-function _execCancelScheduled({ scheduleId }) {
-  const idx = _scheduled.findIndex(s => s.id === scheduleId);
-  if (idx < 0) return { error: `Schedule not found: ${scheduleId}` };
+  const cancelled = jobs[index];
+  if (cancelled.status !== "pending") {
+    return { error: `Schedule ${scheduleId} is already ${cancelled.status}` };
+  }
 
-  clearTimeout(_scheduled[idx].timerId);
-  const cancelled = _scheduled.splice(idx, 1)[0];
+  cancelled.status = "cancelled";
+  cancelled.finishedAt = Date.now();
+  cancelled.error = null;
+  cancelled.expiresAt = cancelled.finishedAt + SCHEDULE_RETENTION_MS;
+  await _saveScheduledJobsToStorage(jobs);
+  await _clearScheduledAlarms(cancelled.id);
+
+  if (chrome.alarms && Number.isFinite(cancelled.expiresAt)) {
+    await chrome.alarms.create(_buildScheduleCleanupAlarmName(cancelled.id), {
+      when: Math.max(Date.now(), cancelled.expiresAt)
+    });
+  }
+
   return {
     success: true,
     cancelled: {
       scheduleId: cancelled.id,
       label: cancelled.label,
       toolName: cancelled.toolName,
-      wasScheduledFor: new Date(cancelled.fireTimestamp).toLocaleString()
+      wasScheduledFor: new Date(cancelled.fireTimestamp).toLocaleString(),
+      status: cancelled.status,
+      expiresAt: new Date(cancelled.expiresAt).toLocaleString()
     }
+  };
+}
+
+/**
+ * Clear completed scheduled jobs directly in storage.
+ */
+async function _execClearCompletedScheduled() {
+  const jobs = await _pruneExpiredScheduledJobsInStorage();
+  const completedJobs = jobs.filter(job => _isTerminalScheduledStatus(job?.status));
+  if (completedJobs.length === 0) {
+    return { success: true, removedCount: 0, removedIds: [] };
+  }
+
+  const kept = jobs.filter(job => !_isTerminalScheduledStatus(job?.status));
+  await _saveScheduledJobsToStorage(kept);
+
+  for (const job of completedJobs) {
+    await _clearScheduledAlarms(job.id);
+  }
+
+  return {
+    success: true,
+    removedCount: completedJobs.length,
+    removedIds: completedJobs.map(job => job.id)
   };
 }
 
@@ -2499,6 +2551,13 @@ export function streamChat(config, messages, { onText, onDone, onError }, mcpToo
   return () => controller.abort();
 }
 
+const DEFAULT_ANTHROPIC_CACHE_CONTROL = { type: "ephemeral" };
+
+function buildOpenAICacheFields(options = {}) {
+  const cacheKey = String(options?.sessionId || "").trim();
+  return cacheKey ? { prompt_cache_key: cacheKey } : {};
+}
+
 // ==================== OpenAI Compatible ====================
 
 async function _streamOpenAI(config, messages, signal, { onText, onDone, onError }, mcpTools = [], options = {}) {
@@ -2516,7 +2575,8 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
         messages,
         tools,
         stream: true,
-        stream_options: { include_usage: true }
+        stream_options: { include_usage: true },
+        ...buildOpenAICacheFields(options)
       }),
       signal
     });
@@ -2645,7 +2705,10 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: config.model, system: systemPrompt, messages: apiMessages,
+        model: config.model,
+        cache_control: DEFAULT_ANTHROPIC_CACHE_CONTROL,
+        system: systemPrompt,
+        messages: apiMessages,
         tools, max_tokens: 4096, stream: true
       }),
       signal

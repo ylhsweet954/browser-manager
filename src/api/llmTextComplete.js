@@ -19,7 +19,14 @@ export async function textComplete(config, messages) {
   return _openaiComplete(config, messages);
 }
 
-async function _openaiComplete(config, messages) {
+const DEFAULT_ANTHROPIC_CACHE_CONTROL = { type: "ephemeral" };
+
+function buildOpenAICacheFields(options = {}) {
+  const cacheKey = String(options?.sessionId || "").trim();
+  return cacheKey ? { prompt_cache_key: cacheKey } : {};
+}
+
+async function _openaiComplete(config, messages, options = {}) {
   const url = `${config.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
   const res = await fetch(url, {
     method: "POST",
@@ -32,6 +39,7 @@ async function _openaiComplete(config, messages) {
       messages,
       stream: false,
       max_tokens: 600,
+      ...buildOpenAICacheFields(options)
     }),
   });
 
@@ -42,10 +50,28 @@ async function _openaiComplete(config, messages) {
 
   const json = await res.json();
   const content = json?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
+  const text = extractOpenAITextContent(content);
+  if (!text) {
     throw new Error("Unexpected OpenAI response shape");
   }
-  return content.trim();
+  return text;
+}
+
+function extractOpenAITextContent(content) {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .filter((block) => block?.type === "text" && typeof block?.text === "string")
+      .map((block) => block.text)
+      .join("")
+      .trim();
+    return text;
+  }
+
+  return "";
 }
 
 async function _anthropicComplete(config, messages) {
@@ -62,6 +88,7 @@ async function _anthropicComplete(config, messages) {
   const url = `${config.baseUrl.replace(/\/$/, "")}/v1/messages`;
   const body = {
     model: config.model,
+    cache_control: DEFAULT_ANTHROPIC_CACHE_CONTROL,
     messages: apiMessages,
     max_tokens: 600,
   };

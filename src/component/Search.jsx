@@ -98,7 +98,13 @@ function Search() {
       <Card>
         <div style={{ padding: "0" }} ref={searchRef} tabIndex="0" onKeyDown={handleKeyDown}>
           <span className="text-sm text-gray-500 font-bold block mb-1">搜索</span>
-          <Input onChange={setFilter} autoFocus={true} inputClassName="!min-h-8" placeholder="输入关键词搜索标签页" />
+          <Input
+            aria-label="搜索标签页"
+            onChange={setFilter}
+            autoFocus={true}
+            inputClassName="!min-h-8"
+            placeholder="输入关键词搜索标签页"
+          />
           {fromTabs.length > 0 &&
             <Card>
               <ul>

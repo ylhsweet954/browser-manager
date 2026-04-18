@@ -1,5 +1,5 @@
 /* global chrome */
-import { Button, Card } from "@sunwu51/camel-ui";
+import { Button, Card, Dialog } from "@sunwu51/camel-ui";
 import { useEffect, useRef, useState } from "react";
 import { streamChat, executeTool } from "../../api/llm";
 import { connectMcpServer, listMcpResources, readMcpResource } from "../../api/mcp";
@@ -9,6 +9,7 @@ import {
   buildSkillsSystemPrompt,
   loadAgentSkills,
   saveAgentSkills,
+  mergeBridgeToolDangerous,
   mergeAgentSkillsServerUrl,
   mergeLoadedSkills
 } from "../../api/skills";
@@ -38,6 +39,7 @@ export default function AgentPanel() {
   const [agentSkills, setAgentSkills] = useState(EMPTY_AGENT_SKILLS);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillStationTools, setSkillStationTools] = useState([]);
+  const [platformInfo, setPlatformInfo] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const historyRef = useRef(null);
@@ -88,13 +90,23 @@ export default function AgentPanel() {
       setAgentSkills(savedSkills);
       if (savedSkills.serverUrl) {
         try {
-          setSkillStationTools(await loadSkillStationTools(savedSkills.serverUrl));
+          setSkillStationTools(await loadSkillStationTools(savedSkills.serverUrl, savedSkills.bridgeToolSettings));
         } catch (error) {
-          console.error("Failed to restore skill-station tools:", error);
+          console.error("Failed to restore skill-bridge tools:", error);
           setSkillStationTools([]);
         }
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    chrome.runtime.getPlatformInfo((info) => {
+      if (chrome.runtime.lastError) {
+        console.error("Failed to get platform info:", chrome.runtime.lastError.message);
+        return;
+      }
+      setPlatformInfo(info || null);
+    });
   }, []);
 
   /** Close history dropdown when clicking outside */
@@ -361,9 +373,11 @@ export default function AgentPanel() {
 
   async function buildSystemPrompt() {
     const memoryBlock = await formatProfileForSystemPrompt().catch(() => "");
+    const platformBlock = buildPlatformSystemPrompt(platformInfo);
     return (
       `You are a browser assistant running inside a browser environment.\n\n` +
       `You can use browser tools to inspect open tabs, tab groups, and windows, focus tabs and windows, move tabs between windows, open tabs, close tabs, create windows, close windows, group tabs, update groups, inspect page DOM, interact with page elements, extract page content, and search browser history.\n\n` +
+      platformBlock +
       `Important rules:\n` +
       `- Do not assume you already know the current browser state. Tabs and windows can change at any time.\n` +
       `- If the user asks about open tabs, browser context, which page they are on, or any page-related question where the target tab is unclear, first call tab_list and/or tab_get_active to refresh context.\n` +
@@ -402,10 +416,23 @@ export default function AgentPanel() {
     setSkillStationTools([]);
   }
 
+  function handleBridgeToolDangerousChange(toolName, dangerous) {
+    setAgentSkills(prev => {
+      const next = mergeBridgeToolDangerous(prev, toolName, dangerous);
+      void saveAgentSkills(next);
+      void loadSkillStationTools(next.serverUrl, next.bridgeToolSettings)
+        .then(setSkillStationTools)
+        .catch((error) => {
+          console.error("Failed to refresh skill-bridge tools:", error);
+        });
+      return next;
+    });
+  }
+
   async function handleLoadSkills(serverUrlInput) {
     const serverUrl = String(serverUrlInput || agentSkills.serverUrl || "").trim();
     if (!serverUrl) {
-      toast.error("请先填写 skill-station 地址");
+      toast.error("请先填写 skill-bridge 地址");
       return;
     }
 
@@ -413,7 +440,7 @@ export default function AgentPanel() {
     try {
       const [loadedSkills, loadedTools] = await Promise.all([
         loadSkillsIndexFromSkillStation(serverUrl),
-        loadSkillStationTools(serverUrl)
+        loadSkillStationTools(serverUrl, agentSkills.bridgeToolSettings)
       ]);
       const next = mergeLoadedSkills(agentSkills, serverUrl, loadedSkills);
       const saved = await saveAgentSkills(next);
@@ -551,7 +578,7 @@ export default function AgentPanel() {
         toast.error(`LLM 错误: ${err.message}`);
         setSessionRuntime(targetSessionId, { loading: false, abort: null });
       }
-    }, combinedMcpTools);
+    }, combinedMcpTools, { sessionId: targetSessionId });
 
     if (!isCurrentRun(targetSessionId, runId)) {
       abort();
@@ -575,6 +602,31 @@ export default function AgentPanel() {
     setSessionTitle("新会话");
     await saveSession(currentSessionId, [], "新会话");
     setSessions(await listSessions());
+  }
+
+  async function handleExportCurrentSession() {
+    const currentSessionId = activeSessionIdRef.current;
+    if (!currentSessionId) return;
+
+    const currentMessages = getSessionMessages(currentSessionId);
+    if (!Array.isArray(currentMessages) || currentMessages.length === 0) {
+      toast("当前会话还没有可导出的内容", { duration: 2500 });
+      return;
+    }
+
+    const markdown = buildSessionExportMarkdown({
+      title: sessionTitle || "新会话",
+      sessionId: currentSessionId,
+      messages: currentMessages
+    });
+
+    try {
+      downloadMarkdownFile(`${currentSessionId}.md`, markdown);
+      toast.success(`已导出 ${currentSessionId}.md`);
+    } catch (error) {
+      console.error("Failed to export session:", error);
+      toast.error(`导出失败: ${error.message || String(error)}`);
+    }
   }
 
   function handleKeyDown(e) {
@@ -630,6 +682,10 @@ export default function AgentPanel() {
       <div className="chat-toolbar">
         <button className="chat-toolbar-btn" onClick={handleNewSession}>+ 新建</button>
         <button className="chat-toolbar-btn" onClick={handleClearCurrentSession}>清空</button>
+        <button className="chat-toolbar-btn" onClick={handleExportCurrentSession}>导出</button>
+        <Dialog trigger={<button className="chat-toolbar-btn">调度</button>}>
+          <ScheduleJobsDialogBody />
+        </Dialog>
         <span className="chat-session-title">{sessionTitle || "新会话"}</span>
         <div className="chat-history-wrapper" ref={historyRef}>
           <button className="chat-toolbar-btn" onClick={() => { setShowHistory(!showHistory); }}>
@@ -661,6 +717,7 @@ export default function AgentPanel() {
                   <button
                     className="chat-history-item-delete"
                     onClick={(e) => handleDeleteSession(s.id, e)}
+                    aria-label={`删除会话 ${s.title || ""}`.trim()}
                     title="删除"
                   >✕</button>
                 </div>
@@ -729,20 +786,26 @@ export default function AgentPanel() {
           disabled={loading || !!pendingApproval}
         />
         <div className="chat-input-actions">
-          <SkillsConfig
-            agentSkills={agentSkills}
-            loading={skillsLoading}
-            skillToolConnected={skillStationTools.length > 0}
-            onServerUrlChange={handleSkillsServerUrlChange}
-            onLoad={handleLoadSkills}
-          />
-          <UserProfilePanel />
-          <McpConfig onToolsChanged={setMcpTools} />
-          {loading ? (
-            <Button className="!text-xs" onPress={stopGeneration}>停止</Button>
-          ) : (
-            <Button className="!text-xs" onPress={sendMessage} isDisabled={!!pendingApproval}>发送</Button>
-          )}
+          <div className="chat-input-actions-left">
+            <UserProfilePanel />
+          </div>
+          <div className="chat-input-actions-right">
+            <SkillsConfig
+              agentSkills={agentSkills}
+              loading={skillsLoading}
+              skillToolConnected={skillStationTools.length > 0}
+              skillBridgeTools={skillStationTools}
+              onServerUrlChange={handleSkillsServerUrlChange}
+              onBridgeToolDangerousChange={handleBridgeToolDangerousChange}
+              onLoad={handleLoadSkills}
+            />
+            <McpConfig onToolsChanged={setMcpTools} />
+            {loading ? (
+              <Button className="!text-xs" onPress={stopGeneration}>停止</Button>
+            ) : (
+              <Button className="!text-xs" onPress={sendMessage} isDisabled={!!pendingApproval}>发送</Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -750,6 +813,365 @@ export default function AgentPanel() {
 }
 
 // ==================== Helper functions ====================
+
+function ScheduleJobsDialogBody() {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [clearingCompleted, setClearingCompleted] = useState(false);
+  const [error, setError] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    let disposed = false;
+
+    async function loadJobs(showSpinner = false) {
+      if (showSpinner) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      try {
+        const result = await executeTool("list_scheduled", {});
+        if (disposed) return;
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        setJobs(Array.isArray(result?.scheduled) ? result.scheduled : []);
+        setError("");
+      } catch (err) {
+        if (disposed) return;
+        setError(err?.message || String(err));
+      } finally {
+        if (!disposed) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    }
+
+    loadJobs(true);
+    const refreshIntervalId = setInterval(() => {
+      loadJobs(false);
+    }, 5000);
+    const clockIntervalId = setInterval(() => {
+      if (!disposed) setNow(Date.now());
+    }, 1000);
+
+    return () => {
+      disposed = true;
+      clearInterval(refreshIntervalId);
+      clearInterval(clockIntervalId);
+    };
+  }, []);
+
+  const hasCompletedJobs = jobs.some((job) => isTerminalScheduleStatus(job?.status));
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const result = await executeTool("list_scheduled", {});
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      setJobs(Array.isArray(result?.scheduled) ? result.scheduled : []);
+      setError("");
+    } catch (err) {
+      setError(err?.message || String(err));
+      toast.error(`刷新调度列表失败: ${err?.message || String(err)}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function handleClearCompleted() {
+    setClearingCompleted(true);
+    try {
+      const result = await executeTool("clear_completed_scheduled", {});
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      const removedCount = Number(result?.removedCount) || 0;
+      setJobs((currentJobs) => currentJobs.filter((job) => !isTerminalScheduleStatus(job?.status)));
+      setError("");
+      toast.success(removedCount > 0 ? `已清理 ${removedCount} 个完成的 job` : "没有可清理的已完成 job");
+    } catch (err) {
+      setError(err?.message || String(err));
+      toast.error(`清理完成 job 失败: ${err?.message || String(err)}`);
+    } finally {
+      setClearingCompleted(false);
+    }
+  }
+
+  return (
+    <div className="schedule-dialog">
+      <div className="schedule-dialog-header">
+        <div>
+          <div className="schedule-dialog-title">Schedule Jobs</div>
+          <div className="schedule-dialog-subtitle">显示待执行任务和最近 24 小时内的执行记录</div>
+        </div>
+        <div className="schedule-dialog-actions">
+          <Button
+            className="!min-h-8 !px-3 !text-xs !whitespace-nowrap !bg-gray-100 !text-gray-700 !border !border-gray-300 hover:!bg-gray-200"
+            onPress={handleRefresh}
+            isDisabled={loading || refreshing || clearingCompleted}
+          >
+            {refreshing ? "刷新中..." : "刷新"}
+          </Button>
+          <Button
+            className="!min-h-8 !px-3 !text-xs !whitespace-nowrap !bg-red-50 !text-red-700 !border !border-red-200 hover:!bg-red-100"
+            onPress={handleClearCompleted}
+            isDisabled={loading || refreshing || clearingCompleted || !hasCompletedJobs}
+          >
+            {clearingCompleted ? "删除中..." : "删除结束项"}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="schedule-dialog-error">加载失败: {error}</div>
+      )}
+
+      {loading && jobs.length === 0 ? (
+        <div className="schedule-dialog-empty">正在加载任务…</div>
+      ) : jobs.length === 0 ? (
+        <div className="schedule-dialog-empty">当前没有可显示的 schedule job</div>
+      ) : (
+        <div className="schedule-job-list">
+          {jobs.map((job) => (
+            <Card key={job.id || job.scheduleId} className="schedule-job-card !p-3 !mb-2">
+              <div className="schedule-job-row">
+                <span className="schedule-job-label">{job.label || job.toolName || "未命名任务"}</span>
+                <span className={`schedule-job-status schedule-job-status-${normalizeScheduleStatusClass(job.status)}`}>
+                  {formatScheduleStatus(job.status)}
+                </span>
+              </div>
+              <div className="schedule-job-meta">
+                <span className="schedule-job-key">ID</span>
+                <code className="schedule-job-value">{job.id || job.scheduleId}</code>
+              </div>
+              <div className="schedule-job-meta">
+                <span className="schedule-job-key">预计执行时间</span>
+                <span className="schedule-job-value">{job.fireAt || "-"}</span>
+              </div>
+              {job.status === "pending" && typeof job.remainingSeconds === "number" && (
+                <div className="schedule-job-meta">
+                  <span className="schedule-job-key">剩余时间</span>
+                  <span className="schedule-job-value">
+                    {formatRemainingSeconds(getLiveRemainingSeconds(job, now))}
+                  </span>
+                </div>
+              )}
+              {job.status === "failed" && job.error && (
+                <div className="schedule-job-error">{job.error}</div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isTerminalScheduleStatus(status) {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function buildSessionExportMarkdown({ title, sessionId, messages }) {
+  const sections = [
+    `# ${title || "新会话"}`,
+    "",
+    `- 导出时间: ${new Date().toLocaleString()}`,
+    `- 会话 ID: ${sessionId || ""}`,
+    ""
+  ];
+
+  for (const msg of messages || []) {
+    sections.push(...serializeExportMessage(msg));
+  }
+
+  return sections.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function serializeExportMessage(msg) {
+  if (!msg || !msg.role) return [];
+
+  if (msg.role === "user") {
+    if (Array.isArray(msg.content)) return [];
+    return [
+      "---",
+      "",
+      "## 用户",
+      "",
+      String(msg.content ?? "").trim() || "_空内容_",
+      ""
+    ];
+  }
+
+  if (msg.role === "assistant") {
+    return serializeAssistantExportMessage(msg);
+  }
+
+  if (msg.role === "tool") {
+    return [
+      `## 工具结果${msg.tool_name ? ` · ${msg.tool_name}` : ""}`,
+      "",
+      formatToolResultForMarkdown(msg),
+      ""
+    ];
+  }
+
+  return [
+    `## ${msg.role}`,
+    "",
+    formatUnknownContentForMarkdown(msg.content),
+    ""
+  ];
+}
+
+function serializeAssistantExportMessage(msg) {
+  const sections = [];
+
+  if (typeof msg.content === "string" && msg.content.trim()) {
+    sections.push("## 助手", "", msg.content.trim(), "");
+  }
+
+  if (Array.isArray(msg.content)) {
+    for (const block of msg.content) {
+      if (!block) continue;
+      if (block.type === "text" && block.text) {
+        sections.push("## 助手", "", String(block.text).trim(), "");
+      } else if (block.type === "tool_use") {
+        sections.push(
+          `## 工具调用${block.name ? ` · ${block.name}` : ""}`,
+          "",
+          formatJsonFence(block.input ?? {}),
+          ""
+        );
+      }
+    }
+  }
+
+  if (Array.isArray(msg.tool_calls)) {
+    for (const toolCall of msg.tool_calls) {
+      const toolName = toolCall?.function?.name || toolCall?.name || "tool";
+      let toolArgs = toolCall?.function?.arguments ?? toolCall?.arguments ?? toolCall?.args ?? {};
+      if (typeof toolArgs === "string") {
+        try {
+          toolArgs = JSON.parse(toolArgs);
+        } catch (error) {
+          toolArgs = { raw: toolArgs };
+        }
+      }
+      sections.push(
+        `## 工具调用 · ${toolName}`,
+        "",
+        formatJsonFence(toolArgs),
+        ""
+      );
+    }
+  }
+
+  if (sections.length === 0) {
+    sections.push("## 助手", "", "_空内容_", "");
+  }
+
+  return sections;
+}
+
+function formatToolResultForMarkdown(msg) {
+  const parsed = parseToolMessageContent(msg.content);
+  const contentBlock = typeof parsed === "string"
+    ? formatTextFence(parsed)
+    : formatJsonFence(parsed ?? {});
+
+  if (!msg.displayImageUrl) {
+    return contentBlock;
+  }
+
+  return [
+    contentBlock,
+    "",
+    `![工具截图](${msg.displayImageUrl})`
+  ].join("\n");
+}
+
+function formatUnknownContentForMarkdown(content) {
+  if (typeof content === "string") return content.trim() || "_空内容_";
+  if (Array.isArray(content)) return formatJsonFence(content);
+  if (content && typeof content === "object") return formatJsonFence(content);
+  return "_空内容_";
+}
+
+function formatScheduleStatus(status) {
+  switch (status) {
+    case "pending": return "待执行";
+    case "running": return "执行中";
+    case "succeeded": return "已成功";
+    case "failed": return "已失败";
+    case "cancelled": return "已取消";
+    default: return status || "未知";
+  }
+}
+
+function normalizeScheduleStatusClass(status) {
+  switch (status) {
+    case "pending":
+    case "running":
+    case "succeeded":
+    case "failed":
+    case "cancelled":
+      return status;
+    default:
+      return "unknown";
+  }
+}
+
+function formatRemainingSeconds(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) return `${hours}小时 ${minutes}分`;
+  if (minutes > 0) return `${minutes}分 ${secs}秒`;
+  return `${secs}秒`;
+}
+
+function getLiveRemainingSeconds(job, now = Date.now()) {
+  if (!job || job.status !== "pending") return 0;
+  const fireAtMs = job.fireAt ? new Date(job.fireAt).getTime() : NaN;
+  if (Number.isFinite(fireAtMs)) {
+    return Math.max(0, Math.round((fireAtMs - now) / 1000));
+  }
+  return Math.max(0, Number(job.remainingSeconds) || 0);
+}
+
+function formatJsonFence(value) {
+  let text = "";
+  try {
+    text = JSON.stringify(value, null, 2);
+  } catch (error) {
+    text = String(value ?? "");
+  }
+  return `\`\`\`json\n${text}\n\`\`\``;
+}
+
+function formatTextFence(value) {
+  return `\`\`\`text\n${String(value ?? "")}\n\`\`\``;
+}
+
+function downloadMarkdownFile(filename, markdown) {
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
 
 function buildAssistantToolCallMessage(apiType, textContent, doneMsg) {
   if (apiType === "anthropic") {
@@ -1029,6 +1451,18 @@ function buildApiMessages(apiType, messages) {
   return buildOpenAIApiMessages(messages);
 }
 
+function buildPlatformSystemPrompt(platformInfo) {
+  if (!platformInfo?.os) {
+    return "";
+  }
+
+  const parts = [`Current operating system: ${platformInfo.os}`];
+  if (platformInfo.arch) parts.push(`architecture: ${platformInfo.arch}`);
+  if (platformInfo.nacl_arch) parts.push(`nacl_arch: ${platformInfo.nacl_arch}`);
+
+  return `Environment:\n- ${parts.join("; ")}.\n\n`;
+}
+
 async function loadSkillsIndexFromSkillStation(serverUrl) {
   const normalizedServerUrl = normalizeSkillStationUrl(serverUrl);
   const connection = await connectMcpServer(normalizedServerUrl, {});
@@ -1038,7 +1472,7 @@ async function loadSkillsIndexFromSkillStation(serverUrl) {
   const resources = await listMcpResources(normalizedServerUrl);
   const skillsIndex = resources.find(resource => resource?.uri === "skills://index");
   if (!skillsIndex) {
-    throw new Error("skill-station 未暴露 skills://index 资源");
+    throw new Error("skill-bridge 未暴露 skills://index 资源");
   }
 
   const resourceResult = await readMcpResource(normalizedServerUrl, {}, "skills://index");
@@ -1080,7 +1514,7 @@ function parseLoadedSkillsResponse(text) {
     .filter(skill => !!skill.path);
 }
 
-async function loadSkillStationTools(serverUrl) {
+async function loadSkillStationTools(serverUrl, bridgeToolSettings = {}) {
   const normalizedServerUrl = normalizeSkillStationUrl(serverUrl);
   const result = await connectMcpServer(normalizedServerUrl, {});
   if (result.error) {
@@ -1090,18 +1524,27 @@ async function loadSkillStationTools(serverUrl) {
   const tools = Array.isArray(result.tools) ? result.tools : [];
   const hasGetSkillDetail = tools.some(tool => tool?.name === "get_skill_detail");
   if (!hasGetSkillDetail) {
-    throw new Error("skill-station 缺少 get_skill_detail 工具");
+    throw new Error("skill-bridge 缺少 get_skill_detail 工具");
   }
 
   return tools.map(tool => ({
     ...tool,
-    _serverId: "skill_station",
-    _serverName: "skill_station",
+    _serverId: "skill_bridge",
+    _serverName: "skill_bridge",
     _serverUrl: normalizedServerUrl,
     _serverHeaders: {},
-    _dangerous: false,
-    _toolCallName: `mcp_skill_station_${tool.name}`
+    _dangerous: resolveSkillBridgeToolDangerous(tool.name, bridgeToolSettings),
+    _toolCallName: `mcp_skill_bridge_${tool.name}`
   }));
+}
+
+function resolveSkillBridgeToolDangerous(toolName, bridgeToolSettings = {}) {
+  const normalizedToolName = String(toolName || "").trim();
+  const explicitDangerous = bridgeToolSettings?.[normalizedToolName]?.dangerous;
+  if (explicitDangerous != null) {
+    return !!explicitDangerous;
+  }
+  return normalizedToolName === "shell";
 }
 
 function normalizeSkillStationUrl(serverUrl) {

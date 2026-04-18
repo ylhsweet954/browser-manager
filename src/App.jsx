@@ -29,7 +29,7 @@ function App() {
             <Workspace />
           </div>
         </TabsItem>
-        <TabsItem title="Agent">
+        <TabsItem title="小助手">
           <AgentPanel />
         </TabsItem>
       </Tabs>

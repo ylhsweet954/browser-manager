@@ -102,6 +102,7 @@ export default function Workspace() {
             {showSave && (
                 <div className="flex gap-1 mb-2">
                     <Input
+                        aria-label="工作区名称"
                         inputClassName="!min-h-8 flex-1"
                         placeholder="输入工作区名称"
                         onChange={setNewName}

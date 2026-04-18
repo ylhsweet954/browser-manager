@@ -5,6 +5,7 @@ const STORAGE_KEY = "agentSkills";
 export const EMPTY_AGENT_SKILLS = {
   serverUrl: "",
   loadedAt: 0,
+  bridgeToolSettings: {},
   skills: []
 };
 
@@ -27,10 +28,11 @@ export function buildSkillsSystemPrompt(agentSkills) {
 
   if (normalized.skills.length === 0) {
     return (
-      `\n\nSkills via skill-station:\n` +
-      `- The user configured the skill-station MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
+      `\n\nSkills via skill-bridge:\n` +
+      `- The user configured the skill-bridge MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
       `- Skills index has not been loaded yet.\n` +
-      `- When skill details are needed, use the MCP tool mcp_skill_station_get_skill_detail (the wrapped MCP tool for get_skill_detail).\n`
+      `- When skill details are needed, use the MCP tool mcp_skill_bridge_get_skill_detail (the wrapped MCP tool for get_skill_detail).\n` +
+      `- If a skill's full content has already been loaded into the current conversation context, reuse that content directly and do not read the same skill again unless the user explicitly asks to reload it.\n`
     );
   }
 
@@ -46,11 +48,12 @@ export function buildSkillsSystemPrompt(agentSkills) {
   });
 
   return (
-    `\n\nSkills via skill-station:\n` +
-    `- The user configured the skill-station MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
+    `\n\nSkills via skill-bridge:\n` +
+    `- The user configured the skill-bridge MCP endpoint ${JSON.stringify(normalized.serverUrl)}.\n` +
     `- The following entries are indexed summaries loaded from the MCP resource skills://index:\n` +
     `${lines.join("\n")}\n` +
-    `- When a task matches one of these skills, use the MCP tool mcp_skill_station_get_skill_detail with the skill directory name to read the full SKILL.md.\n` +
+    `- When a task matches one of these skills, use the MCP tool mcp_skill_bridge_get_skill_detail with the skill directory name to read the full SKILL.md.\n` +
+    `- If a skill's full content has already been loaded into the current conversation context, reuse that content directly and do not read the same skill again unless the user explicitly asks to reload it.\n` +
     `- Do not rely on the summary alone when the task depends on the actual skill workflow.\n`
   );
 }
@@ -58,6 +61,7 @@ export function buildSkillsSystemPrompt(agentSkills) {
 export function normalizeAgentSkills(agentSkills) {
   const serverUrl = normalizeServerUrl(agentSkills?.serverUrl || agentSkills?.rootPath || agentSkills?.rootName || "");
   const loadedAt = Number(agentSkills?.loadedAt || agentSkills?.scannedAt) || 0;
+  const bridgeToolSettings = normalizeBridgeToolSettings(agentSkills?.bridgeToolSettings);
   const rawSkills = Array.isArray(agentSkills?.skills) ? agentSkills.skills : [];
 
   const skills = rawSkills
@@ -73,6 +77,7 @@ export function normalizeAgentSkills(agentSkills) {
   return {
     serverUrl,
     loadedAt,
+    bridgeToolSettings,
     skills
   };
 }
@@ -83,15 +88,31 @@ export function mergeAgentSkillsServerUrl(agentSkills, serverUrl) {
   return normalizeAgentSkills({
     serverUrl: normalizedServerUrl,
     loadedAt: normalizedCurrent.serverUrl === normalizedServerUrl ? normalizedCurrent.loadedAt : 0,
+    bridgeToolSettings: normalizedCurrent.bridgeToolSettings,
     skills: normalizedCurrent.serverUrl === normalizedServerUrl ? normalizedCurrent.skills : []
   });
 }
 
 export function mergeLoadedSkills(_agentSkills, serverUrl, skills) {
+  const normalizedCurrent = normalizeAgentSkills(_agentSkills);
   return normalizeAgentSkills({
     serverUrl,
     loadedAt: Date.now(),
+    bridgeToolSettings: normalizedCurrent.bridgeToolSettings,
     skills
+  });
+}
+
+export function mergeBridgeToolDangerous(agentSkills, toolName, dangerous) {
+  const normalizedCurrent = normalizeAgentSkills(agentSkills);
+  return normalizeAgentSkills({
+    ...normalizedCurrent,
+    bridgeToolSettings: {
+      ...normalizedCurrent.bridgeToolSettings,
+      [String(toolName || "").trim()]: {
+        dangerous: !!dangerous
+      }
+    }
   });
 }
 
@@ -111,4 +132,17 @@ function normalizeServerUrl(serverUrl) {
 
 function normalizeRelativePath(path) {
   return String(path || "").trim().replace(/\\/g, "/").replace(/^\.?\//, "");
+}
+
+function normalizeBridgeToolSettings(settings) {
+  if (!settings || typeof settings !== "object") return {};
+  const normalized = {};
+  for (const [toolName, value] of Object.entries(settings)) {
+    const key = String(toolName || "").trim();
+    if (!key) continue;
+    normalized[key] = {
+      dangerous: !!value?.dangerous
+    };
+  }
+  return normalized;
 }

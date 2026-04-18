@@ -166,7 +166,7 @@ export default function SettingsDialog() {
           <Button
             className="!min-h-6 !px-2 !text-xs"
             disabled={reusePolicyCount === 0}
-            onClick={handleClearReusePolicies}
+            onPress={handleClearReusePolicies}
           >
             清除域名记忆
           </Button>
