@@ -1,0 +1,268 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import { Button, Dialog } from "@sunwu51/camel-ui";
+import { useState } from "react";
+
+/**
+ * Render a single chat message based on its role and content.
+ * @param {object} props
+ * @param {object} props.msg
+ * @param {number} [props.messageIndex]
+ * @param {(index: number) => void} [props.onRewindToUserMessage]
+ */
+export default function ChatMessage({ msg, messageIndex, onRewindToUserMessage }) {
+  const { role, content } = msg;
+
+  // User message
+  if (role === "user") {
+    if (Array.isArray(content)) return null; // skip Anthropic tool_result
+    const showRewind =
+      typeof messageIndex === "number" &&
+      typeof onRewindToUserMessage === "function";
+    return (
+      <div className="chat-msg chat-msg-user">
+        <div className="chat-msg-user-inner">
+          {showRewind && (
+            <Dialog
+              trigger={
+                <button
+                  type="button"
+                  className="chat-user-rewind-btn"
+                  title="回退到此消息"
+                  aria-label="回退到此消息"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  ↩
+                </button>
+              }
+            >
+              <div className="text-sm font-semibold text-gray-600 mb-2">回退到此消息</div>
+              <div className="text-xs text-gray-500 mb-3">回退到这条消息后，之后的消息会被删除。</div>
+              <div className="flex justify-end">
+                <Button
+                  className="!text-xs"
+                  onPress={() => onRewindToUserMessage(messageIndex)}
+                >
+                  确认回退
+                </Button>
+              </div>
+            </Dialog>
+          )}
+          <div className="chat-bubble chat-bubble-user">{content}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Tool result message (OpenAI format)
+  if (role === "tool") {
+    return <ToolResultBlock msg={msg} />;
+  }
+
+  if (role === "error") {
+    return <ErrorResultBlock msg={msg} />;
+  }
+
+  // Assistant message
+  if (role === "assistant") {
+    const rendered = [];
+
+    // Anthropic format: content is array of blocks
+    if (Array.isArray(content)) {
+      for (let i = 0; i < content.length; i++) {
+        const block = content[i];
+        if (!block) continue;
+        if (block.type === "text" && block.text) {
+          rendered.push(<AssistantTextBubble key={`t${i}`} text={block.text} />);
+        } else if (block.type === "tool_use") {
+          rendered.push(<ToolCallBlock key={`tc${i}`} name={block.name} input={block.input} />);
+        }
+      }
+    }
+
+    // OpenAI format: tool_calls array on the message object
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      // Render text content if present
+      if (content && typeof content === "string") {
+        rendered.push(<AssistantTextBubble key="text" text={content} />);
+      }
+      for (let i = 0; i < msg.tool_calls.length; i++) {
+        const tc = msg.tool_calls[i];
+        // Extract name — could be in tc.function.name or tc.name
+        const toolName = tc.function?.name || tc.name || "tool";
+        // Extract arguments — could be string or object, in various locations
+        let input = tc.function?.arguments ?? tc.arguments ?? tc.args ?? {};
+        if (typeof input === "string") {
+          try { input = JSON.parse(input); } catch (e) { input = { raw: input }; }
+        }
+        rendered.push(<ToolCallBlock key={`otc${i}`} name={toolName} input={input} />);
+      }
+    }
+
+    // If we rendered something from array/tool_calls, return it
+    if (rendered.length > 0) return <>{rendered}</>;
+
+    // Plain text only
+    if (content && typeof content === "string") {
+      return <AssistantTextBubble text={content} />;
+    }
+
+    // Empty or null content with no tool_calls — skip
+    return null;
+  }
+
+  return null;
+}
+
+/** Markdown-rendered assistant text bubble */
+function AssistantTextBubble({ text }) {
+  return (
+    <div className="chat-msg chat-msg-assistant">
+      <div className="chat-bubble chat-bubble-assistant">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+          {text}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Collapsed block showing which tool was called.
+ * Handles various data shapes defensively.
+ */
+function ToolCallBlock({ name, input }) {
+  const [expanded, setExpanded] = useState(false);
+  const label = name || "tool";
+
+  let detail = "";
+  if (!input || typeof input !== "object") {
+    detail = String(input || "");
+  } else if (input.tabId) {
+    detail = `Tab ${input.tabId}`;
+  } else if (input.tabIds) {
+    detail = `${input.tabIds.length} tabs`;
+  } else if (input.url) {
+    detail = input.url;
+  } else if (input.query) {
+    detail = input.query;
+  } else {
+    detail = JSON.stringify(input);
+  }
+
+  return (
+    <div className="tool-result-msg" onClick={() => setExpanded(!expanded)}>
+      <div className="tool-result-header">
+        <span className="tool-result-arrow">{expanded ? "▼" : "▶"}</span>
+        <span className="tool-result-label">🔧 {label}({detail})</span>
+      </div>
+      {expanded && (
+        <pre className="tool-result-content">
+          {typeof input === "object" ? JSON.stringify(input, null, 2) : String(input)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** Collapsed block showing tool execution result (success or failure) */
+function ToolResultBlock({ msg }) {
+  const [expanded, setExpanded] = useState(false);
+  const { content, displayImageUrl, tool_name: toolName } = msg;
+
+  let label = "tool result";
+  let isError = false;
+
+  if (typeof content === "string") {
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.error) {
+        isError = true;
+        label = parsed.error;
+      } else if (parsed.title) {
+        label = parsed.title;
+      } else if (parsed.success) {
+        label = parsed.url || parsed.name || "success";
+      } else if (parsed.result) {
+        label = typeof parsed.result === "string" ? parsed.result.substring(0, 60) : "result";
+      }
+    } catch (e) { /* use default */ }
+  } else if (typeof content === "object" && content !== null) {
+    // content could be an object if not stringified
+    if (content.error) { isError = true; label = content.error; }
+    else if (content.title) label = content.title;
+    else if (content.success) label = content.url || content.name || "success";
+  }
+
+  const displayContent = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  if (toolName && label === "success") {
+    label = toolName;
+  }
+
+  return (
+    <div className={`tool-result-msg ${isError ? "tool-result-error" : ""}`} onClick={() => setExpanded(!expanded)}>
+      <div className="tool-result-header">
+        <span className="tool-result-arrow">{expanded ? "▼" : "▶"}</span>
+        <span className="tool-result-label">{isError ? "❌" : "✅"} {label}</span>
+      </div>
+      {displayImageUrl && (
+        <div className="tool-result-content" style={{ paddingTop: "8px", paddingBottom: expanded ? "8px" : "0" }}>
+          <img
+            src={displayImageUrl}
+            alt={toolName || "tool screenshot"}
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              width: "100%",
+              maxHeight: expanded ? "420px" : "180px",
+              objectFit: "contain",
+              borderRadius: "8px",
+              background: "#f5f5f5"
+            }}
+          />
+        </div>
+      )}
+      {expanded && (
+        <pre className="tool-result-content">{displayContent}</pre>
+      )}
+    </div>
+  );
+}
+
+function ErrorResultBlock({ msg }) {
+  const [expanded, setExpanded] = useState(false);
+  const payload = typeof msg.content === "string" ? safeJsonParse(msg.content) : (msg.content || {});
+  const code = payload?.code || "LLM_ERROR";
+  const message = payload?.message || "LLM 请求失败";
+  const attempts = Number(payload?.attempts) || 1;
+  const maxAttempts = Number(payload?.maxAttempts) || attempts;
+  const summary = `${code}: ${message}`;
+  const detail = {
+    ...payload,
+    attempts,
+    maxAttempts
+  };
+
+  return (
+    <div className="tool-result-msg tool-result-error" onClick={() => setExpanded(!expanded)}>
+      <div className="tool-result-header">
+        <span className="tool-result-arrow">{expanded ? "▼" : "▶"}</span>
+        <span className="tool-result-label">❌ {summary}（重试 {attempts}/{maxAttempts}）</span>
+      </div>
+      {expanded && (
+        <pre className="tool-result-content">{JSON.stringify(detail, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return { raw: value };
+  }
+}
