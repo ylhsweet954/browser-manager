@@ -1,4 +1,5 @@
 /* global chrome */
+import { resolveLlmRequestUrl } from "./llmEndpoint";
 
 /**
  * Lightweight non-streaming, no-tools LLM text completion.
@@ -27,7 +28,7 @@ function buildOpenAICacheFields(options = {}) {
 }
 
 async function _openaiComplete(config, messages, options = {}) {
-  const url = `${config.baseUrl.replace(/\/$/, "")}/v1/chat/completions`;
+  const url = resolveLlmRequestUrl("openai", config.baseUrl);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -85,7 +86,7 @@ async function _anthropicComplete(config, messages) {
     }
   }
 
-  const url = `${config.baseUrl.replace(/\/$/, "")}/v1/messages`;
+  const url = resolveLlmRequestUrl("anthropic", config.baseUrl);
   const body = {
     model: config.model,
     cache_control: DEFAULT_ANTHROPIC_CACHE_CONTROL,

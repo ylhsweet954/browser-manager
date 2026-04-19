@@ -62,6 +62,10 @@ export default function ChatMessage({ msg, messageIndex, onRewindToUserMessage }
     return <ToolResultBlock msg={msg} />;
   }
 
+  if (role === "error") {
+    return <ErrorResultBlock msg={msg} />;
+  }
+
   // Assistant message
   if (role === "assistant") {
     const rendered = [];
@@ -226,4 +230,39 @@ function ToolResultBlock({ msg }) {
       )}
     </div>
   );
+}
+
+function ErrorResultBlock({ msg }) {
+  const [expanded, setExpanded] = useState(false);
+  const payload = typeof msg.content === "string" ? safeJsonParse(msg.content) : (msg.content || {});
+  const code = payload?.code || "LLM_ERROR";
+  const message = payload?.message || "LLM 请求失败";
+  const attempts = Number(payload?.attempts) || 1;
+  const maxAttempts = Number(payload?.maxAttempts) || attempts;
+  const summary = `${code}: ${message}`;
+  const detail = {
+    ...payload,
+    attempts,
+    maxAttempts
+  };
+
+  return (
+    <div className="tool-result-msg tool-result-error" onClick={() => setExpanded(!expanded)}>
+      <div className="tool-result-header">
+        <span className="tool-result-arrow">{expanded ? "▼" : "▶"}</span>
+        <span className="tool-result-label">❌ {summary}（重试 {attempts}/{maxAttempts}）</span>
+      </div>
+      {expanded && (
+        <pre className="tool-result-content">{JSON.stringify(detail, null, 2)}</pre>
+      )}
+    </div>
+  );
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return { raw: value };
+  }
 }

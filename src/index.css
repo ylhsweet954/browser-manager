@@ -63,6 +63,14 @@ html, body, #root {
   gap: 0.25rem;
 }
 
+.dialog-dialog .settings-api-url-hint {
+  margin-top: -0.05rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #6b7280;
+  word-break: break-all;
+}
+
 .dialog-dialog .settings-secret-field label {
   margin: 3px 0 !important;
 }
@@ -117,6 +125,31 @@ html, body, #root {
 .dialog-dialog .settings-secret-toggle svg {
   width: 16px;
   height: 16px;
+}
+
+.dialog-dialog .settings-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: min(560px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+}
+
+.dialog-dialog .settings-reuse-memory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.dialog-dialog .settings-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
 }
 
 /* Fix camel-ui checkbox text vertical alignment */

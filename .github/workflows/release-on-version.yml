@@ -1,0 +1,85 @@
+name: Release On Version
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Read manifest version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./public/manifest.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Manifest version: $VERSION"
+
+      - name: Check release exists
+        id: release_check
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        with:
+          script: |
+            const tag = process.env.VERSION;
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag
+              });
+              core.setOutput('exists', 'true');
+              core.info(`Release already exists for tag ${tag}`);
+            } catch (error) {
+              if (error.status === 404) {
+                core.setOutput('exists', 'false');
+                core.info(`Release does not exist for tag ${tag}`);
+                return;
+              }
+              throw error;
+            }
+
+      - name: Stop when release already exists
+        if: steps.release_check.outputs.exists == 'true'
+        run: echo "Release already exists for version ${{ steps.version.outputs.version }}. Skipping."
+
+      - name: Install dependencies
+        if: steps.release_check.outputs.exists != 'true'
+        run: npm install
+
+      - name: Build
+        if: steps.release_check.outputs.exists != 'true'
+        run: npm run build
+
+      - name: Package dist
+        if: steps.release_check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd dist
+          zip -r "../version-${VERSION}.zip" .
+
+      - name: Create GitHub release
+        if: steps.release_check.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          files: version-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true

@@ -1,5 +1,6 @@
 /* global chrome */
 import { callMcpTool } from "./mcp";
+import { resolveLlmRequestUrl } from "./llmEndpoint";
 
 const DOM_LOCATOR_PROPERTIES = {
   tabId: { type: "number", description: "Optional browser tab ID. Defaults to the current active tab." },
@@ -10,6 +11,8 @@ const DOM_LOCATOR_PROPERTIES = {
 };
 const DEFAULT_SCHEDULE_TOOL_TIMEOUT_SECONDS = 30;
 const DEFAULT_MCP_TOOL_TIMEOUT_SECONDS = 60;
+const DEFAULT_LLM_FIRST_PACKET_TIMEOUT_SECONDS = 20;
+const MAX_LLM_STREAM_RETRIES = 3;
 const SCHEDULE_STORAGE_KEY = "scheduledJobs";
 const SCHEDULE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const SCHEDULE_FIRE_ALARM_PREFIX = "schedule-fire:";
@@ -484,9 +487,10 @@ export function buildMcpToolCallName(serverName, toolName) {
  * @param {Array} [mcpTools] - MCP tools from connected servers [{name, description, inputSchema, _serverUrl, _serverHeaders, _toolCallName}]
  * @param {Object} [options]
  * @param {boolean} [options.includeBuiltins=true] - Whether to include built-in browser tools
+ * @param {boolean} [options.supportsImageInput=true] - Whether the selected model accepts image inputs
  * @returns {Array} formatted tool definitions
  */
-export function getTools(apiType, mcpTools = [], { includeBuiltins = true } = {}) {
+export function getTools(apiType, mcpTools = [], { includeBuiltins = true, supportsImageInput = true } = {}) {
   // Convert MCP tools to our internal format
   const externalTools = mcpTools.map(t => ({
     name: t._toolCallName || buildMcpToolCallName(t._serverName || "server", t.name),
@@ -494,7 +498,10 @@ export function getTools(apiType, mcpTools = [], { includeBuiltins = true } = {}
     schema: t.inputSchema || { type: "object", properties: {} }
   }));
 
-  const allTools = includeBuiltins ? [...TOOLS, ...externalTools] : externalTools;
+  const builtInTools = includeBuiltins
+    ? TOOLS.filter(tool => supportsImageInput || tool.name !== "tab_screenshot")
+    : [];
+  const allTools = [...builtInTools, ...externalTools];
 
   if (apiType === "anthropic") {
     return allTools.map(t => ({
@@ -2533,20 +2540,16 @@ async function _execClearCompletedScheduled() {
  *
  * @param {Object} config - { apiType, baseUrl, apiKey, model }
  * @param {Array} messages - conversation messages
- * @param {Object} callbacks - { onText, onDone, onError }
+ * @param {Object} callbacks - { onText, onDone, onError, onRetry }
  * @param {Array} [mcpTools] - MCP tools to include
  * @param {Object} [options]
  * @param {boolean} [options.includeBuiltins=true] - Whether to expose built-in browser tools
  * @returns {Function} abort
  */
-export function streamChat(config, messages, { onText, onDone, onError }, mcpTools = [], options = {}) {
+export function streamChat(config, messages, { onText, onDone, onError, onRetry }, mcpTools = [], options = {}) {
   const controller = new AbortController();
 
-  if (config.apiType === "anthropic") {
-    _streamAnthropic(config, messages, controller.signal, { onText, onDone, onError }, mcpTools, options);
-  } else {
-    _streamOpenAI(config, messages, controller.signal, { onText, onDone, onError }, mcpTools, options);
-  }
+  void _streamWithRetry(config, messages, controller.signal, { onText, onDone, onError, onRetry }, mcpTools, options);
 
   return () => controller.abort();
 }
@@ -2560,10 +2563,67 @@ function buildOpenAICacheFields(options = {}) {
 
 // ==================== OpenAI Compatible ====================
 
-async function _streamOpenAI(config, messages, signal, { onText, onDone, onError }, mcpTools = [], options = {}) {
+async function _streamWithRetry(config, messages, signal, callbacks, mcpTools = [], options = {}) {
+  const failures = [];
+
+  for (let attempt = 1; attempt <= MAX_LLM_STREAM_RETRIES; attempt++) {
+    if (signal.aborted) return;
+
+    try {
+      if (config.apiType === "anthropic") {
+        await _streamAnthropicAttempt(config, messages, signal, callbacks, mcpTools, options);
+      } else {
+        await _streamOpenAIAttempt(config, messages, signal, callbacks, mcpTools, options);
+      }
+      return;
+    } catch (error) {
+      if (isAbortError(error) && signal.aborted) return;
+
+      const normalizedError = normalizeLlmStreamError(error, {
+        apiType: config.apiType,
+        attempt,
+        maxAttempts: MAX_LLM_STREAM_RETRIES
+      });
+
+      failures.push({
+        attempt,
+        code: normalizedError.code || "LLM_ERROR",
+        message: normalizedError.message || "LLM request failed",
+        status: normalizedError.status || null,
+        detail: normalizedError.detail || null
+      });
+
+      if (attempt < MAX_LLM_STREAM_RETRIES) {
+        callbacks.onRetry?.({
+          attempt,
+          nextAttempt: attempt + 1,
+          maxAttempts: MAX_LLM_STREAM_RETRIES,
+          error: normalizedError
+        });
+        try {
+          await delayRetry(attempt, signal);
+        } catch (retryError) {
+          if (isAbortError(retryError)) return;
+          throw retryError;
+        }
+        continue;
+      }
+
+      normalizedError.attempts = attempt;
+      normalizedError.maxAttempts = MAX_LLM_STREAM_RETRIES;
+      normalizedError.failures = failures;
+      callbacks.onError?.(normalizedError);
+      return;
+    }
+  }
+}
+
+async function _streamOpenAIAttempt(config, messages, signal, { onText, onDone }, mcpTools = [], options = {}) {
+  const tools = getTools("openai", mcpTools, options);
+  const url = resolveLlmRequestUrl("openai", config.baseUrl);
+  const timeoutState = createFirstPacketTimeoutState(signal, getFirstPacketTimeoutMs(config));
+
   try {
-    const tools = getTools("openai", mcpTools, options);
-    const url = `${config.baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -2578,16 +2638,27 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
         stream_options: { include_usage: true },
         ...buildOpenAICacheFields(options)
       }),
-      signal
+      signal: timeoutState.signal
     });
 
     if (!res.ok) {
-      const errText = await res.text();
-      onError(new Error(`API error ${res.status}: ${errText}`));
-      return;
+      const errText = await res.text().catch(() => "");
+      throw createLlmStreamError({
+        code: `HTTP_${res.status}`,
+        message: `LLM 接口返回 HTTP ${res.status}`,
+        status: res.status,
+        detail: errText || `HTTP ${res.status}`
+      });
     }
 
-    const reader = res.body.getReader();
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw createLlmStreamError({
+        code: "EMPTY_RESPONSE_BODY",
+        message: "LLM 未返回响应流"
+      });
+    }
+
     const decoder = new TextDecoder();
     let fullContent = "";
     let toolCallsMap = {};
@@ -2597,10 +2668,13 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value?.length) {
+        timeoutState.markFirstPacketReceived();
+      }
       buffer += decoder.decode(value, { stream: true });
 
       const lines = buffer.split("\n");
-      buffer = lines.pop();
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -2615,7 +2689,7 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
 
           if (delta.content) {
             fullContent += delta.content;
-            onText(delta.content);
+            onText?.(delta.content);
           }
 
           if (delta.tool_calls) {
@@ -2628,8 +2702,18 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
               if (tc.function?.arguments) toolCallsMap[idx].arguments += tc.function.arguments;
             }
           }
-        } catch (e) { /* skip */ }
+        } catch (error) {
+          throw createLlmStreamError({
+            code: "STREAM_PARSE_ERROR",
+            message: "解析 OpenAI 流式响应失败",
+            detail: error?.message || String(error)
+          });
+        }
       }
+    }
+
+    if (!timeoutState.firstPacketReceived) {
+      throw buildFirstPacketTimeoutError(config);
     }
 
     const rawToolCalls = Object.entries(toolCallsMap)
@@ -2651,24 +2735,29 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
             args: JSON.parse(tc.arguments || "{}"),
             _raw: tc.arguments || "{}"
           };
-        } catch (e) {
-          parseFailures.push({ name: tc.name, arguments: tc.arguments, error: e.message });
+        } catch (error) {
+          parseFailures.push({ name: tc.name, arguments: tc.arguments, error: error.message });
           return null;
         }
       })
       .filter(Boolean);
 
     if (parseFailures.length > 0) {
-      onError(new Error(`Failed to parse tool call arguments: ${parseFailures.map(f => f.name).join(", ")}`));
-      return;
+      throw createLlmStreamError({
+        code: "TOOL_CALL_PARSE_ERROR",
+        message: "工具调用参数解析失败",
+        detail: parseFailures
+      });
     }
 
     if (sawToolCallDelta && toolCalls.length === 0 && !fullContent) {
-      onError(new Error("Model emitted tool call deltas but no valid tool calls could be reconstructed"));
-      return;
+      throw createLlmStreamError({
+        code: "EMPTY_TOOL_CALL_STREAM",
+        message: "模型返回了工具调用片段，但未能重建有效工具调用"
+      });
     }
 
-    onDone({
+    onDone?.({
       role: "assistant",
       content: fullContent || null,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -2677,17 +2766,26 @@ async function _streamOpenAI(config, messages, signal, { onText, onDone, onError
         function: { name: tc.name, arguments: tc._raw }
       })) : undefined
     });
-  } catch (e) {
-    if (e.name !== "AbortError") onError(e);
+  } catch (error) {
+    if (timeoutState.didTimeout && !signal.aborted) {
+      throw buildFirstPacketTimeoutError(config);
+    }
+    if (isAbortError(error) && signal.aborted) {
+      throw error;
+    }
+    throw error;
+  } finally {
+    timeoutState.cleanup();
   }
 }
 
 // ==================== Anthropic Messages API ====================
 
-async function _streamAnthropic(config, messages, signal, { onText, onDone, onError }, mcpTools = [], options = {}) {
-  try {
-    const tools = getTools("anthropic", mcpTools, options);
+async function _streamAnthropicAttempt(config, messages, signal, { onText, onDone }, mcpTools = [], options = {}) {
+  const tools = getTools("anthropic", mcpTools, options);
+  const timeoutState = createFirstPacketTimeoutState(signal, getFirstPacketTimeoutMs(config));
 
+  try {
     let systemPrompt = "";
     const apiMessages = [];
     for (const msg of messages) {
@@ -2695,7 +2793,7 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
       else apiMessages.push(msg);
     }
 
-    const url = `${config.baseUrl.replace(/\/$/, '')}/v1/messages`;
+    const url = resolveLlmRequestUrl("anthropic", config.baseUrl);
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -2711,16 +2809,27 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
         messages: apiMessages,
         tools, max_tokens: 4096, stream: true
       }),
-      signal
+      signal: timeoutState.signal
     });
 
     if (!res.ok) {
-      const errText = await res.text();
-      onError(new Error(`API error ${res.status}: ${errText}`));
-      return;
+      const errText = await res.text().catch(() => "");
+      throw createLlmStreamError({
+        code: `HTTP_${res.status}`,
+        message: `LLM 接口返回 HTTP ${res.status}`,
+        status: res.status,
+        detail: errText || `HTTP ${res.status}`
+      });
     }
 
-    const reader = res.body.getReader();
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw createLlmStreamError({
+        code: "EMPTY_RESPONSE_BODY",
+        message: "LLM 未返回响应流"
+      });
+    }
+
     const decoder = new TextDecoder();
     let fullContent = "";
     let collectedToolUses = [];
@@ -2731,10 +2840,13 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value?.length) {
+        timeoutState.markFirstPacketReceived();
+      }
       buffer += decoder.decode(value, { stream: true });
 
       const lines = buffer.split("\n");
-      buffer = lines.pop();
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -2750,7 +2862,7 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
           } else if (json.type === "content_block_delta") {
             if (json.delta?.type === "text_delta") {
               fullContent += json.delta.text;
-              onText(json.delta.text);
+              onText?.(json.delta.text);
             } else if (json.delta?.type === "input_json_delta" && currentToolUse) {
               currentToolUse.inputJson += json.delta.partial_json;
             }
@@ -2758,8 +2870,18 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
             collectedToolUses.push(currentToolUse);
             currentToolUse = null;
           }
-        } catch (e) { /* skip */ }
+        } catch (error) {
+          throw createLlmStreamError({
+            code: "STREAM_PARSE_ERROR",
+            message: "解析 Anthropic 流式响应失败",
+            detail: error?.message || String(error)
+          });
+        }
       }
+    }
+
+    if (!timeoutState.firstPacketReceived) {
+      throw buildFirstPacketTimeoutError(config);
     }
 
     const parseFailures = [];
@@ -2771,21 +2893,26 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
             name: tu.name,
             args: JSON.parse(tu.inputJson || "{}")
           };
-        } catch (e) {
-          parseFailures.push({ name: tu.name, inputJson: tu.inputJson, error: e.message });
+        } catch (error) {
+          parseFailures.push({ name: tu.name, inputJson: tu.inputJson, error: error.message });
           return null;
         }
       })
       .filter(Boolean);
 
     if (parseFailures.length > 0) {
-      onError(new Error(`Failed to parse tool call arguments: ${parseFailures.map(f => f.name).join(", ")}`));
-      return;
+      throw createLlmStreamError({
+        code: "TOOL_CALL_PARSE_ERROR",
+        message: "工具调用参数解析失败",
+        detail: parseFailures
+      });
     }
 
     if (sawToolUseBlock && toolCalls.length === 0 && !fullContent) {
-      onError(new Error("Model emitted tool_use blocks but no valid tool calls could be reconstructed"));
-      return;
+      throw createLlmStreamError({
+        code: "EMPTY_TOOL_CALL_STREAM",
+        message: "模型返回了工具调用片段，但未能重建有效工具调用"
+      });
     }
 
     const contentBlocks = [];
@@ -2794,12 +2921,131 @@ async function _streamAnthropic(config, messages, signal, { onText, onDone, onEr
       contentBlocks.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.args });
     }
 
-    onDone({
+    onDone?.({
       role: "assistant",
       content: contentBlocks.length > 0 ? contentBlocks : null,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined
     });
-  } catch (e) {
-    if (e.name !== "AbortError") onError(e);
+  } catch (error) {
+    if (timeoutState.didTimeout && !signal.aborted) {
+      throw buildFirstPacketTimeoutError(config);
+    }
+    if (isAbortError(error) && signal.aborted) {
+      throw error;
+    }
+    throw error;
+  } finally {
+    timeoutState.cleanup();
   }
+}
+
+function getFirstPacketTimeoutMs(config) {
+  return Math.max(1, Number(config?.firstPacketTimeoutSeconds) || DEFAULT_LLM_FIRST_PACKET_TIMEOUT_SECONDS) * 1000;
+}
+
+function createFirstPacketTimeoutState(parentSignal, timeoutMs) {
+  const controller = new AbortController();
+  let firstPacketReceived = false;
+  let didTimeout = false;
+
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+  };
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else if (parentSignal) {
+    parentSignal.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    get firstPacketReceived() {
+      return firstPacketReceived;
+    },
+    get didTimeout() {
+      return didTimeout;
+    },
+    markFirstPacketReceived() {
+      if (firstPacketReceived) return;
+      firstPacketReceived = true;
+      clearTimeout(timeoutId);
+    },
+    cleanup() {
+      clearTimeout(timeoutId);
+      parentSignal?.removeEventListener?.("abort", abortFromParent);
+    }
+  };
+}
+
+function buildFirstPacketTimeoutError(config) {
+  const timeoutSeconds = Math.max(1, Number(config?.firstPacketTimeoutSeconds) || DEFAULT_LLM_FIRST_PACKET_TIMEOUT_SECONDS);
+  return createLlmStreamError({
+    code: "FIRST_PACKET_TIMEOUT",
+    message: `首包超时，${timeoutSeconds} 秒内未收到响应`,
+    detail: { timeoutSeconds }
+  });
+}
+
+function createLlmStreamError({ code, message, status, detail }) {
+  const error = new Error(message || "LLM request failed");
+  error.code = code || "LLM_ERROR";
+  if (status != null) error.status = status;
+  if (detail != null) error.detail = detail;
+  return error;
+}
+
+function normalizeLlmStreamError(error, { apiType, attempt, maxAttempts }) {
+  if (error?.code) {
+    error.apiType = apiType;
+    error.attempt = attempt;
+    error.maxAttempts = maxAttempts;
+    return error;
+  }
+
+  const normalized = createLlmStreamError({
+    code: inferLlmErrorCode(error),
+    message: error?.message || "LLM 请求失败",
+    detail: error?.stack || String(error)
+  });
+  normalized.apiType = apiType;
+  normalized.attempt = attempt;
+  normalized.maxAttempts = maxAttempts;
+  return normalized;
+}
+
+function inferLlmErrorCode(error) {
+  if (isAbortError(error)) return "REQUEST_ABORTED";
+  if (error instanceof TypeError) return "NETWORK_ERROR";
+  return "LLM_ERROR";
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+async function delayRetry(attempt, signal) {
+  const delayMs = Math.min(800, attempt * 250);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.("abort", onAbort);
+      resolve();
+    }, delayMs);
+
+    function onAbort() {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    }
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
 }

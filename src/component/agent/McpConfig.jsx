@@ -1,6 +1,6 @@
 /* global chrome */
 import { Button, Card, Input, Dialog, Checkbox } from "@sunwu51/camel-ui";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { connectMcpServer } from "../../api/mcp";
 import { BUILTIN_TOOL_COUNT, buildMcpToolCallName } from "../../api/llm";
 import toast from "react-hot-toast";
@@ -24,6 +24,7 @@ export default function McpConfig({ onToolsChanged }) {
   const [expandedServers, setExpandedServers] = useState({});
   const overLimitRef = useRef(false);
   const dialogBodyRef = useRef(null);
+  const hasAutoFocusedRef = useRef(false);
 
   function focusServerNameInput(container = dialogBodyRef.current) {
     if (!container) return;
@@ -33,12 +34,16 @@ export default function McpConfig({ onToolsChanged }) {
     });
   }
 
-  function handleDialogBodyRef(node) {
+  const handleDialogBodyRef = useCallback((node) => {
     dialogBodyRef.current = node;
-    if (node) {
+    if (node && !hasAutoFocusedRef.current) {
+      hasAutoFocusedRef.current = true;
       focusServerNameInput(node);
     }
-  }
+    if (!node) {
+      hasAutoFocusedRef.current = false;
+    }
+  }, []);
 
   function normalizeServerName(name) {
     const trimmed = String(name || "").trim();

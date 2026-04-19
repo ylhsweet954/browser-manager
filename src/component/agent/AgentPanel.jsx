@@ -402,9 +402,19 @@ export default function AgentPanel() {
 
   async function getLLMConfig() {
     const { llmConfig } = await chrome.storage.local.get({
-      llmConfig: { apiType: "openai", baseUrl: "", apiKey: "", model: "" }
+      llmConfig: {
+        apiType: "openai",
+        baseUrl: "",
+        apiKey: "",
+        model: "",
+        firstPacketTimeoutSeconds: 20,
+        supportsImageInput: true
+      }
     });
-    return llmConfig;
+    return {
+      ...llmConfig,
+      supportsImageInput: llmConfig?.supportsImageInput !== false
+    };
   }
 
   function handleSkillsServerUrlChange(serverUrl) {
@@ -487,7 +497,9 @@ export default function AgentPanel() {
   async function runConversation(config, targetSessionId, conversationMessages, runId) {
     if (!isCurrentRun(targetSessionId, runId)) return;
     const systemPrompt = await buildSystemPrompt();
-    const apiConversationMessages = buildApiMessages(config.apiType, conversationMessages);
+    const apiConversationMessages = buildApiMessages(config.apiType, conversationMessages, {
+      supportsImageInput: config.supportsImageInput !== false
+    });
     const fullMessages = [{ role: "system", content: systemPrompt }, ...apiConversationMessages];
 
     let streamedContent = "";
@@ -506,6 +518,19 @@ export default function AgentPanel() {
             updated[lastIdx] = { role: "assistant", content: streamedContent, _streaming: true };
           }
         setSessionMessages(targetSessionId, updated);
+      },
+
+      onRetry: ({ nextAttempt, maxAttempts, error }) => {
+        if (!isCurrentRun(targetSessionId, runId)) return;
+        streamedContent = "";
+        const prevMessages = getSessionMessages(targetSessionId);
+        const updated = [...prevMessages];
+        const lastIdx = updated.length - 1;
+        if (lastIdx >= 0 && updated[lastIdx]._streaming) {
+          updated[lastIdx] = { role: "assistant", content: "", _streaming: true };
+        }
+        setSessionMessages(targetSessionId, updated);
+        toast(`LLM 重试中 (${nextAttempt}/${maxAttempts})：${error.code || "LLM_ERROR"}`, { duration: 1800 });
       },
 
       onDone: async (msg) => {
@@ -576,9 +601,18 @@ export default function AgentPanel() {
       onError: (err) => {
         if (!isCurrentRun(targetSessionId, runId)) return;
         toast.error(`LLM 错误: ${err.message}`);
+        const finalMessages = replaceStreamingPlaceholder(
+          getSessionMessages(targetSessionId),
+          buildLlmErrorDisplayMessage(err)
+        );
+        setSessionMessages(targetSessionId, finalMessages);
         setSessionRuntime(targetSessionId, { loading: false, abort: null });
+        void autoSave(targetSessionId, finalMessages);
       }
-    }, combinedMcpTools, { sessionId: targetSessionId });
+    }, combinedMcpTools, {
+      sessionId: targetSessionId,
+      supportsImageInput: config.supportsImageInput !== false
+    });
 
     if (!isCurrentRun(targetSessionId, runId)) {
       abort();
@@ -1021,6 +1055,15 @@ function serializeExportMessage(msg) {
     ];
   }
 
+  if (msg.role === "error") {
+    return [
+      "## 错误",
+      "",
+      formatJsonFence(msg.content ?? {}),
+      ""
+    ];
+  }
+
   return [
     `## ${msg.role}`,
     "",
@@ -1188,6 +1231,36 @@ function buildToolResultMessages(toolResults) {
   return toolResults.map(tr => buildDisplayToolResultMessage(tr));
 }
 
+function replaceStreamingPlaceholder(messages, replacement) {
+  const updated = [...(messages || [])];
+  const lastIdx = updated.length - 1;
+  if (lastIdx >= 0 && updated[lastIdx]?._streaming) {
+    updated[lastIdx] = replacement;
+    return updated;
+  }
+  updated.push(replacement);
+  return updated;
+}
+
+function buildLlmErrorDisplayMessage(error) {
+  const code = error?.code || "LLM_ERROR";
+  const message = error?.message || "LLM 请求失败";
+  const failures = Array.isArray(error?.failures) ? error.failures : [];
+  return {
+    role: "error",
+    content: {
+      code,
+      message,
+      status: error?.status || null,
+      attempts: Number(error?.attempts) || failures.length || 1,
+      maxAttempts: Number(error?.maxAttempts) || failures.length || 1,
+      apiType: error?.apiType || "",
+      failures,
+      detail: error?.detail || null
+    }
+  };
+}
+
 function buildDisplayToolResultMessage(toolResult) {
   const parsedImage = parseImageDataUrl(toolResult?.result?.dataUrl);
   const summary = summarizeToolResult(toolResult.result);
@@ -1241,10 +1314,12 @@ function normalizeToolSummary(summary) {
   return { result: summary == null ? "" : String(summary) };
 }
 
-function buildAnthropicToolResultContentFromMessage(msg) {
+function buildAnthropicToolResultContentFromMessage(msg, options = {}) {
   const summary = normalizeToolSummary(parseToolMessageContent(msg.content));
   const parsedImage = parseImageDataUrl(msg.displayImageUrl);
-  if (!parsedImage) return typeof summary === "string" ? summary : JSON.stringify(summary);
+  if (!parsedImage || options.supportsImageInput === false) {
+    return typeof summary === "string" ? summary : JSON.stringify(summary);
+  }
 
   return [
     {
@@ -1262,9 +1337,9 @@ function buildAnthropicToolResultContentFromMessage(msg) {
   ];
 }
 
-function buildOpenAIToolResultAttachmentMessageFromMessage(msg) {
+function buildOpenAIToolResultAttachmentMessageFromMessage(msg, options = {}) {
   const parsedImage = parseImageDataUrl(msg.displayImageUrl);
-  if (!parsedImage) return null;
+  if (!parsedImage || options.supportsImageInput === false) return null;
 
   const summary = normalizeToolSummary(parseToolMessageContent(msg.content));
   return {
@@ -1354,11 +1429,13 @@ function buildOpenAIAssistantMessageFromAnthropic(msg) {
   };
 }
 
-function buildOpenAIApiMessages(messages) {
+function buildOpenAIApiMessages(messages, options = {}) {
   const apiMessages = [];
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+
+    if (msg.role === "error") continue;
 
     if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
       const followingToolMessages = [];
@@ -1369,7 +1446,7 @@ function buildOpenAIApiMessages(messages) {
       }
 
       const attachmentMessages = followingToolMessages
-        .map(toolMsg => buildOpenAIToolResultAttachmentMessageFromMessage(toolMsg))
+        .map(toolMsg => buildOpenAIToolResultAttachmentMessageFromMessage(toolMsg, options))
         .filter(Boolean);
 
       apiMessages.push(...attachmentMessages);
@@ -1404,11 +1481,13 @@ function buildOpenAIApiMessages(messages) {
   return apiMessages;
 }
 
-function buildAnthropicApiMessages(messages) {
+function buildAnthropicApiMessages(messages, options = {}) {
   const apiMessages = [];
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+
+    if (msg.role === "error") continue;
 
     if (msg.role === "tool") {
       const blocks = [];
@@ -1417,7 +1496,7 @@ function buildAnthropicApiMessages(messages) {
         blocks.push({
           type: "tool_result",
           tool_use_id: toolMsg.tool_call_id,
-          content: buildAnthropicToolResultContentFromMessage(toolMsg)
+          content: buildAnthropicToolResultContentFromMessage(toolMsg, options)
         });
         i += 1;
       }
@@ -1444,11 +1523,11 @@ function buildAnthropicApiMessages(messages) {
   return apiMessages;
 }
 
-function buildApiMessages(apiType, messages) {
+function buildApiMessages(apiType, messages, options = {}) {
   if (apiType === "anthropic") {
-    return buildAnthropicApiMessages(messages);
+    return buildAnthropicApiMessages(messages, options);
   }
-  return buildOpenAIApiMessages(messages);
+  return buildOpenAIApiMessages(messages, options);
 }
 
 function buildPlatformSystemPrompt(platformInfo) {
