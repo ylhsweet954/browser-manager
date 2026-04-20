@@ -8,8 +8,8 @@ declare module "wxt/browser" {
     | "/background.js"
     | "/content-scripts/content.js"
     | "/sidepanel.html"
-    | "/tab.png"
-  type HtmlPublicPath = Extract<PublicPath, `${string}.html`>
+    | "/logo.png";
+  type HtmlPublicPath = Extract<PublicPath, `${string}.html`>;
   export interface WxtRuntime {
     getURL(path: PublicPath): string;
     getURL(path: `${HtmlPublicPath}${string}`): string;

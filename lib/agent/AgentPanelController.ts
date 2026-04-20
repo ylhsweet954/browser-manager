@@ -19,6 +19,7 @@ import {
 } from '@/lib/agent/panel-helpers'
 import { createChatMessageEl, type ChatMsg } from '@/lib/agent/render-messages'
 import { executeTool, streamChat } from '@/lib/api/llm'
+import { resolveStoredLlmModel } from '@/lib/config/llmDefaults'
 import {
   createSession,
   deleteSession,
@@ -906,8 +907,11 @@ export class AgentPanelController {
         supportsImageInput: true,
       },
     })
+    const raw = llmConfig as Record<string, unknown>
+    const apiType = String(raw.apiType || 'openai')
     return {
-      ...(llmConfig as object),
+      ...raw,
+      model: resolveStoredLlmModel(apiType, raw.model as string | undefined),
       supportsImageInput: (llmConfig as { supportsImageInput?: boolean })?.supportsImageInput !== false,
     }
   }

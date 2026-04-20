@@ -12,17 +12,17 @@ Tab Manager 是一个面向重度标签页用户的 Chrome / Edge 扩展（Manif
 
 ## 技术栈
 
-- **[WXT](https://wxt.dev/)**：扩展构建与入口管理  
-- **TypeScript + 原生 DOM**：侧边栏界面  
-- **Tailwind CSS**：样式工具类  
-- **Vitest**：单元测试  
+- **[WXT](https://wxt.dev/)**：扩展构建与入口管理
+- **TypeScript + 原生 DOM**：侧边栏界面
+- **Tailwind CSS**：样式工具类
+- **Vitest**：单元测试
 - **Playwright**：E2E（加载扩展产物 + 基础导航）
 
 业务逻辑主要位于 [`lib/api/`](lib/api/)（由原 `src/api` 迁移），小助手 UI 控制器在 [`lib/agent/AgentPanelController.ts`](lib/agent/AgentPanelController.ts)。
 
 ## 环境要求
 
-- Node.js >= 18  
+- Node.js >= 18
 - npm（如遇企业内部 registry 404，可使用 `npm install --registry=https://registry.npmjs.org/`）
 
 ## 开发与构建
@@ -55,7 +55,7 @@ lib/
   api/                   # LLM、MCP、会话、Skills 等
   agent/                 # 小助手控制器、Markdown、危险工具元数据等
 public/
-  tab.png                # 扩展图标
+  logo.png                # 扩展图标
 tests/                   # Vitest
 tests/e2e/               # Playwright
 ```
@@ -70,5 +70,5 @@ tests/e2e/               # Playwright
 
 ## 视频
 
-- [Bilibili](https://www.bilibili.com/video/BV1TsdZBmEo5)  
+- [Bilibili](https://www.bilibili.com/video/BV1TsdZBmEo5)
 - [Bilibili](https://www.bilibili.com/video/BV1XKH7eEEM9/)

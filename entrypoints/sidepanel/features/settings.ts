@@ -1,5 +1,6 @@
 /* global chrome */
 import { resolveLlmRequestUrl } from '@/lib/api/llmEndpoint'
+import { defaultLlmModelForApiType } from '@/lib/config/llmDefaults'
 import { clearReuseDomainPolicies, getReuseDomainPolicies } from '@/lib/api/tabReuse'
 import { openModal } from '@/entrypoints/sidepanel/ui/modal'
 import { toast } from '@/entrypoints/sidepanel/ui/toast'
@@ -38,7 +39,7 @@ async function openSettingsDialog(): Promise<void> {
   let baseUrl = llm.baseUrl || ''
   let apiKey = llm.apiKey || ''
   let showKey = false
-  let model = llm.model || ''
+  let model = (llm.model || '').trim() || defaultLlmModelForApiType(llm.apiType === 'anthropic' ? 'anthropic' : 'openai')
   let firstPacketTimeoutSeconds = Math.max(1, Number(llm.firstPacketTimeoutSeconds) || 20)
   let supportsImageInput = llm.supportsImageInput !== false
   let suspendTimeout = Number(res.suspendTimeout) || 0
@@ -81,7 +82,7 @@ async function openSettingsDialog(): Promise<void> {
 
     body.appendChild(secretApiKeyRow())
 
-    body.appendChild(labeledInput('模型', model, (v) => (model = v), apiType === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o'))
+    body.appendChild(labeledInput('模型', model, (v) => (model = v), defaultLlmModelForApiType(apiType)))
 
     body.appendChild(
       labeledInput(

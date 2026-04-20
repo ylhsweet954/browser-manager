@@ -1,3 +1,4 @@
+import { resolveStoredLlmModel } from "@/lib/config/llmDefaults";
 import type { LlmApiType } from "./llmEndpoint";
 import { resolveLlmRequestUrl } from "./llmEndpoint";
 
@@ -147,8 +148,9 @@ export async function getLLMConfigForMemory(): Promise<LlmTextConfig | null> {
     llmConfig: DEFAULT_LLM_STORAGE,
   });
   const c = llmConfig as LlmTextConfig;
-  if (!c?.apiKey || !c?.baseUrl || !c?.model) {
+  const model = resolveStoredLlmModel(c?.apiType, c?.model);
+  if (!c?.apiKey || !c?.baseUrl) {
     return null;
   }
-  return c;
+  return { ...c, model };
 }
