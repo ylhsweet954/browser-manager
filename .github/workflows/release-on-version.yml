@@ -22,13 +22,13 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Read manifest version
+      - name: Read package version
         id: version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./public/manifest.json').version")
+          VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Manifest version: $VERSION"
+          echo "Package version: $VERSION"
 
       - name: Check release exists
         id: release_check
@@ -67,13 +67,13 @@ jobs:
         if: steps.release_check.outputs.exists != 'true'
         run: npm run build
 
-      - name: Package dist
+      - name: Package extension output
         if: steps.release_check.outputs.exists != 'true'
         shell: bash
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          cd dist
-          zip -r "../version-${VERSION}.zip" .
+          cd .output/chrome-mv3
+          zip -r "../../version-${VERSION}.zip" .
 
       - name: Create GitHub release
         if: steps.release_check.outputs.exists != 'true'
