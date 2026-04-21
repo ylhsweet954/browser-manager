@@ -12,6 +12,12 @@ function ensureContainer(): HTMLDivElement {
   return container
 }
 
+function toastClass(kind: ToastKind): string {
+  if (kind === 'success') return 'bm-toast bm-toast--success'
+  if (kind === 'error') return 'bm-toast bm-toast--error'
+  return 'bm-toast bm-toast--info'
+}
+
 export function showToast(
   message: string,
   kindOrOpts: ToastKind | { kind?: ToastKind; duration?: number } = 'info',
@@ -28,13 +34,7 @@ export function showToast(
   }
   const wrap = ensureContainer()
   const el = document.createElement('div')
-  const bg =
-    kind === 'success'
-      ? 'bg-emerald-700 text-white'
-      : kind === 'error'
-        ? 'bg-red-600 text-white'
-        : 'bg-gray-800 text-white'
-  el.className = `pointer-events-auto px-3 py-2 rounded-lg text-xs shadow-lg ${bg}`
+  el.className = `${toastClass(kind)} pointer-events-auto`
   el.textContent = message
   wrap.appendChild(el)
   window.setTimeout(() => {

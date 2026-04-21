@@ -33,7 +33,7 @@ export class McpConfigUi {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className =
-      'text-xs whitespace-nowrap bg-gray-100 text-gray-700 border border-gray-300 rounded px-2 py-1 hover:bg-gray-200'
+      'text-xs whitespace-nowrap rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted px-2 py-1 hover:bg-bm-hover'
     const refreshLabel = () => {
       const connected = this.servers.filter((s) => s.enabled).length
       const n = this.countEnabledTools()
@@ -73,7 +73,7 @@ export class McpConfigUi {
     body.className = 'text-xs space-y-2 max-w-[720px]'
 
     const title = document.createElement('div')
-    title.className = 'text-sm font-bold text-gray-500 mb-2'
+    title.className = 'font-serif text-sm font-medium text-bm-fg-muted mb-2'
     title.textContent = 'MCP 服务器'
     body.appendChild(title)
 
@@ -83,19 +83,19 @@ export class McpConfigUi {
       for (const s of this.servers) {
         const card = document.createElement('div')
         card.setAttribute('data-mcp-dynamic', '1')
-        card.className = 'border border-gray-200 rounded p-2 mb-2'
+        card.className = 'border border-bm-border rounded-xl p-2 mb-2 bg-bm-muted'
 
         const row = document.createElement('div')
         row.className = 'flex items-center gap-2 min-w-0'
         const dot = document.createElement('span')
-        dot.className = `inline-block w-2 h-2 rounded-full shrink-0 ${s.enabled ? 'bg-green-500' : 'bg-red-400'}`
+        dot.className = `inline-block w-2 h-2 rounded-full shrink-0 ${s.enabled ? 'bg-[#047857]' : 'bg-[var(--color-error)]'}`
         const info = document.createElement('div')
         info.className = 'flex-1 min-w-0'
         const n = document.createElement('div')
         n.className = 'text-xs font-medium truncate'
         n.textContent = s.name || s.url
         const sub = document.createElement('div')
-        sub.className = 'text-xs text-gray-400'
+        sub.className = 'text-xs text-bm-fg-subtle'
         const enabledTools =
           s.tools?.filter((tool) => this.getToolSetting(s, String(tool.name)).enabled !== false).length || 0
         sub.textContent = s.enabled ? `${enabledTools}/${s.tools?.length || 0} 个工具` : s.error || '未连接'
@@ -104,14 +104,16 @@ export class McpConfigUi {
         actions.className = 'flex gap-1 flex-shrink-0 flex-wrap justify-end'
         const btnTools = document.createElement('button')
         btnTools.type = 'button'
-        btnTools.className = 'text-xs px-2 py-0.5 border rounded'
+        btnTools.className =
+          'text-xs px-2 py-0.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
         btnTools.textContent = this.expanded[s.id] ? '收起' : '工具'
         btnTools.addEventListener('click', () => {
           this.expanded[s.id] = !this.expanded[s.id]
           render()
         })
         const btnRe = document.createElement('button')
-        btnRe.className = 'text-xs px-2 py-0.5 border rounded'
+        btnRe.className =
+          'text-xs px-2 py-0.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
         btnRe.textContent = '刷新'
         btnRe.addEventListener('click', async () => {
           await this.handleReconnect(s)
@@ -119,7 +121,8 @@ export class McpConfigUi {
           refreshLabel()
         })
         const btnRm = document.createElement('button')
-        btnRm.className = 'text-xs px-2 py-0.5 border rounded'
+        btnRm.className =
+          'text-xs px-2 py-0.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
         btnRm.textContent = '删除'
         btnRm.addEventListener('click', async () => {
           await this.handleRemove(s.id)
@@ -135,9 +138,9 @@ export class McpConfigUi {
             const tn = String(tool.name)
             const settings = this.getToolSetting(s, tn)
             const tcard = document.createElement('div')
-            tcard.className = 'rounded border border-gray-100 p-2 mt-2'
-            tcard.innerHTML = `<div class="text-xs font-medium break-all">${tn}</div>
-              <div class="text-xs text-gray-400 mt-1">${String(tool.description || '无描述')}</div>`
+            tcard.className = 'rounded-xl border border-bm-border p-2 mt-2 bg-bm-card'
+            tcard.innerHTML = `<div class="text-xs font-medium break-all text-bm-fg">${tn}</div>
+              <div class="text-xs text-bm-fg-subtle mt-1">${String(tool.description || '无描述')}</div>`
             const toggles = document.createElement('div')
             toggles.className = 'flex gap-3 mt-2 flex-wrap'
             toggles.append(
@@ -159,19 +162,20 @@ export class McpConfigUi {
       if (total > MCP_WARNING_LIMIT) {
         const w = document.createElement('div')
         w.setAttribute('data-mcp-dynamic', '1')
-        w.className = 'text-xs text-amber-600 mb-2'
+        w.className = 'text-xs text-bm-coral mb-2'
         w.textContent = `当前已启用 ${total} 个 MCP 工具。过多的工具函数可能导致调用失败，请适当调整。`
         body.appendChild(w)
       }
 
       const addBlock = document.createElement('div')
       addBlock.setAttribute('data-mcp-dynamic', '1')
-      addBlock.className = 'border-t border-gray-100 pt-2 mt-2 space-y-2'
+      addBlock.className = 'border-t border-bm-border pt-2 mt-2 space-y-2'
       const nameIn = this.labeledInput('名称', 'my_server')
       const urlIn = this.labeledInput('服务器 URL', 'http://localhost:3000/mcp')
       const hdrIn = this.labeledInput('Headers (JSON, 可选)', '{"Authorization":"Bearer xx"}')
       const connectBtn = document.createElement('button')
-      connectBtn.className = 'w-full mt-2 py-2 text-sm border rounded bg-white hover:bg-gray-50'
+      connectBtn.className =
+        'w-full mt-2 py-2 text-sm rounded-xl border border-bm-accent bg-bm-accent text-bm-accent-fg hover:opacity-95'
       connectBtn.textContent = '连接'
       connectBtn.addEventListener('click', async () => {
         connectBtn.disabled = true
@@ -203,7 +207,7 @@ export class McpConfigUi {
     danger?: boolean,
   ): HTMLElement {
     const lab = document.createElement('label')
-    lab.className = 'flex items-center gap-1 text-xs' + (danger ? ' text-red-600' : '')
+    lab.className = 'flex items-center gap-1 text-xs' + (danger ? ' text-[var(--color-error)]' : '')
     const cb = document.createElement('input')
     cb.type = 'checkbox'
     cb.checked = checked
@@ -216,10 +220,11 @@ export class McpConfigUi {
   private labeledInput(label: string, placeholder: string): { wrap: HTMLElement; input: HTMLInputElement } {
     const wrap = document.createElement('div')
     const l = document.createElement('label')
-    l.className = 'block text-xs text-gray-500 mb-0.5'
+    l.className = 'block text-xs text-bm-fg-muted mb-0.5'
     l.textContent = label
     const input = document.createElement('input')
-    input.className = 'w-full border rounded px-2 py-1.5 text-sm box-border'
+    input.className =
+      'w-full border border-bm-border-strong rounded-xl px-2 py-1.5 text-sm box-border bg-bm-input-bg text-bm-fg'
     input.placeholder = placeholder
     wrap.append(l, input)
     return { wrap, input }

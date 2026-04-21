@@ -27,7 +27,8 @@ const DEFAULT_SETTINGS = {
 export function createSettingsButton(): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
-  btn.className = 'w-16 text-xs py-1 border rounded bg-white hover:bg-gray-50 shadow-sm'
+  btn.className =
+    'w-16 text-xs py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover hover:text-bm-fg shadow-whisper'
   btn.textContent = '设置'
   btn.addEventListener('click', () => void openSettingsDialog())
   return btn
@@ -66,9 +67,10 @@ async function openSettingsDialog(): Promise<void> {
     body.innerHTML = ''
 
     const apiRow = document.createElement('div')
-    apiRow.innerHTML = `<label class="block text-sm font-medium text-gray-500 mb-1">API 类型</label>`
+    apiRow.innerHTML = `<label class="block text-sm font-medium text-bm-fg-muted mb-1">API 类型</label>`
     const apiSel = document.createElement('select')
-    apiSel.className = 'w-full border rounded px-2 py-1.5 text-sm'
+    apiSel.className =
+      'w-full border border-bm-border-strong rounded-xl px-2 py-1.5 text-sm bg-bm-input-bg text-bm-fg'
     apiSel.innerHTML = `<option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option>`
     apiSel.value = apiType
     apiSel.addEventListener('change', () => {
@@ -108,7 +110,7 @@ async function openSettingsDialog(): Promise<void> {
     imgCb.addEventListener('change', () => (supportsImageInput = imgCb.checked))
     imgRow.appendChild(imgCb)
     const imgTxt = document.createElement('span')
-    imgTxt.className = 'text-sm text-gray-700'
+    imgTxt.className = 'text-sm text-bm-fg'
     imgTxt.textContent = '模型支持图片输入（开启后允许截图工具，并把截图作为图片上下文传给模型）'
     imgRow.appendChild(imgTxt)
     body.appendChild(imgRow)
@@ -125,9 +127,10 @@ async function openSettingsDialog(): Promise<void> {
     )
 
     const susRow = document.createElement('div')
-    susRow.innerHTML = `<label class="block text-sm font-medium text-gray-500 mb-1">自动释放长期不用标签的内存</label>`
+    susRow.innerHTML = `<label class="block text-sm font-medium text-bm-fg-muted mb-1">自动释放长期不用标签的内存</label>`
     const susSel = document.createElement('select')
-    susSel.className = 'w-full border rounded px-2 py-1.5 text-sm'
+    susSel.className =
+      'w-full border border-bm-border-strong rounded-xl px-2 py-1.5 text-sm bg-bm-input-bg text-bm-fg'
     suspendOptions.forEach((o) => {
       const opt = document.createElement('option')
       opt.value = String(o.value)
@@ -150,7 +153,7 @@ async function openSettingsDialog(): Promise<void> {
     reuseRow.appendChild(reuseCb)
     reuseRow.appendChild(
       Object.assign(document.createElement('span'), {
-        className: 'text-sm text-gray-700',
+        className: 'text-sm text-bm-fg',
         textContent: '复用 Tab（命中已存在页面时优先询问是否复用，并可记住域名选择）',
       }),
     )
@@ -158,10 +161,11 @@ async function openSettingsDialog(): Promise<void> {
 
     const memRow = document.createElement('div')
     memRow.className = 'settings-reuse-memory-row'
-    memRow.innerHTML = `<span class="text-xs text-gray-500">已记住 ${reusePolicyCount} 个域名的复用决策</span>`
+    memRow.innerHTML = `<span class="text-xs text-bm-fg-muted">已记住 ${reusePolicyCount} 个域名的复用决策</span>`
     const clearMem = document.createElement('button')
     clearMem.type = 'button'
-    clearMem.className = 'text-xs px-2 py-0.5 border rounded disabled:opacity-50'
+    clearMem.className =
+      'text-xs px-2 py-0.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover disabled:opacity-50'
     clearMem.textContent = '清空域名复用记忆'
     clearMem.disabled = reusePolicyCount === 0
     clearMem.addEventListener('click', async () => {
@@ -177,11 +181,11 @@ async function openSettingsDialog(): Promise<void> {
     actions.className = 'settings-dialog-actions'
     const cancel = document.createElement('button')
     cancel.type = 'button'
-    cancel.className = 'text-sm min-h-8 px-4 bg-gray-100 text-gray-700 border border-gray-300 rounded hover:bg-gray-200'
+    cancel.className = 'settings-btn-secondary'
     cancel.textContent = '取消'
     const ok = document.createElement('button')
     ok.type = 'button'
-    ok.className = 'text-sm min-h-8 px-4 bg-blue-600 text-white border border-blue-600 rounded hover:bg-blue-700'
+    ok.className = 'settings-btn-primary'
     ok.textContent = '确认'
     cancel.addEventListener('click', () => close())
     ok.addEventListener('click', async () => {
@@ -213,10 +217,11 @@ async function openSettingsDialog(): Promise<void> {
   ): HTMLElement {
     const wrap = document.createElement('div')
     const lab = document.createElement('label')
-    lab.className = 'block text-sm font-medium text-gray-500 mb-1'
+    lab.className = 'block text-sm font-medium text-bm-fg-muted mb-1'
     lab.textContent = label
     const inp = document.createElement('input')
-    inp.className = 'w-full min-h-8 border border-gray-300 rounded px-2 py-1 text-sm box-border'
+    inp.className =
+      'w-full min-h-8 border border-bm-border-strong rounded-xl px-2 py-1 text-sm box-border bg-bm-input-bg text-bm-fg focus:outline-none focus:border-bm-accent focus:ring-1 focus:ring-[var(--bm-focus-ring)]'
     inp.value = value
     inp.placeholder = placeholder
     inp.addEventListener('input', () => onChange(inp.value))
@@ -228,7 +233,7 @@ async function openSettingsDialog(): Promise<void> {
     const wrap = document.createElement('div')
     wrap.className = 'settings-secret-field'
     const lab = document.createElement('label')
-    lab.className = 'block text-sm font-medium text-gray-500 mb-1'
+    lab.className = 'block text-sm font-medium text-bm-fg-muted mb-1'
     lab.htmlFor = 'settings-api-key'
     lab.textContent = 'API Key'
     const row = document.createElement('div')

@@ -22,10 +22,10 @@ export function mountSearch(container: HTMLElement): void {
   let fromHistory: Array<{ history: chrome.history.HistoryItem; score: number }> = []
   let selectedIndex = 0
   const card = document.createElement('div')
-  card.className = 'rounded-lg border border-gray-200 bg-white p-2 shadow-sm'
+  card.className = 'rounded-2xl border border-bm-border bg-bm-card p-2 shadow-whisper'
 
   const label = document.createElement('span')
-  label.className = 'text-sm text-gray-500 font-bold block mb-1'
+  label.className = 'font-serif text-sm text-bm-fg-muted font-medium block mb-1'
   label.textContent = '搜索'
 
   const searchWrap = document.createElement('div')
@@ -35,12 +35,12 @@ export function mountSearch(container: HTMLElement): void {
   const input = document.createElement('input')
   input.type = 'text'
   input.className =
-    'w-full min-h-8 border border-gray-300 rounded px-2 py-1 text-sm box-border focus:border-blue-500 focus:outline-none'
+    'w-full min-h-8 border border-bm-border-strong rounded-xl px-2 py-1 text-sm box-border bg-bm-input-bg text-bm-fg focus:outline-none focus:border-[var(--bm-focus-ring)] focus:ring-1 focus:ring-[var(--bm-focus-ring)]'
   input.placeholder = '输入关键词搜索标签页'
   input.setAttribute('aria-label', '搜索标签页')
 
   const listCard = document.createElement('div')
-  listCard.className = 'mt-2 rounded-lg border border-gray-200 overflow-hidden'
+  listCard.className = 'mt-2 rounded-xl border border-bm-border overflow-hidden bg-bm-elevated'
 
   const ul = document.createElement('ul')
   listCard.appendChild(ul)
@@ -128,11 +128,11 @@ export function mountSearch(container: HTMLElement): void {
 
     fromTabs.forEach((item, index) => {
       const li = document.createElement('li')
-      li.className = 'font-bold border-b border-gray-100 last:border-b-0'
+      li.className = 'font-medium border-b border-bm-border last:border-b-0'
       const row = document.createElement('button')
       row.type = 'button'
-      row.className = `w-full text-left px-1 py-1 min-h-8 rounded-md hover:bg-amber-100 ${
-        selectedIndex === index ? 'bg-amber-100' : 'bg-white'
+      row.className = `w-full text-left px-1 py-1 min-h-8 rounded-lg transition-colors hover:bg-bm-hover ${
+        selectedIndex === index ? 'bg-bm-hover-strong' : 'bg-bm-elevated'
       }`
       row.addEventListener('mousemove', () => {
         searchWrap.focus()
@@ -150,8 +150,8 @@ export function mountSearch(container: HTMLElement): void {
       const top = document.createElement('div')
       top.className = 'flex items-center gap-1'
       const badge = document.createElement('span')
-      badge.className = `text-[10px] px-2 py-0.5 rounded text-white shrink-0 min-w-[5rem] text-center ${
-        curWindow?.id === item.tab.windowId ? 'bg-emerald-700' : 'bg-blue-600'
+      badge.className = `text-[10px] px-2 py-0.5 rounded-lg text-bm-accent-fg shrink-0 min-w-[5rem] text-center ${
+        curWindow?.id === item.tab.windowId ? 'bg-bm-accent' : 'bg-bm-fg-muted'
       }`
       badge.textContent = `${curWindow?.id === item.tab.windowId ? '当前' : '其他'}-${item.score}`
       const fav = item.tab.favIconUrl
@@ -164,13 +164,13 @@ export function mountSearch(container: HTMLElement): void {
           })()
         : null
       const title = document.createElement('p')
-      title.className = 'flex-1 truncate text-xs'
+      title.className = 'flex-1 truncate text-xs text-bm-fg'
       title.textContent = item.tab.title || ''
       top.append(badge, ...(fav ? [fav] : []), title)
       if (selectedIndex === index) {
         const close = document.createElement('span')
         close.className =
-          'shrink-0 ml-1 w-5 h-5 rounded flex items-center justify-center bg-red-400 hover:bg-red-600 text-white text-sm cursor-pointer'
+          'shrink-0 ml-1 w-5 h-5 rounded-md flex items-center justify-center bg-[var(--color-error)] hover:opacity-90 text-bm-accent-fg text-sm cursor-pointer'
         close.textContent = '×'
         close.title = '关闭此标签页'
         close.addEventListener('click', async (e) => {
@@ -181,7 +181,7 @@ export function mountSearch(container: HTMLElement): void {
         top.appendChild(close)
       }
       const url = document.createElement('p')
-      url.className = 'details text-[11px] text-gray-500 truncate pl-1'
+      url.className = 'details text-[11px] text-bm-fg-muted truncate pl-1'
       url.textContent = `url: ${item.tab.url || ''}`
       inner.append(top, url)
       row.appendChild(inner)
@@ -192,11 +192,11 @@ export function mountSearch(container: HTMLElement): void {
     fromHistory.forEach((item, index) => {
       const globalIndex = fromTabs.length + index
       const li = document.createElement('li')
-      li.className = 'font-bold border-b border-gray-100 last:border-b-0'
+      li.className = 'font-medium border-b border-bm-border last:border-b-0'
       const row = document.createElement('button')
       row.type = 'button'
-      row.className = `w-full text-left px-1 py-1 min-h-8 rounded-md hover:bg-amber-100 ${
-        selectedIndex === globalIndex ? 'bg-amber-100' : 'bg-white'
+      row.className = `w-full text-left px-1 py-1 min-h-8 rounded-lg transition-colors hover:bg-bm-hover ${
+        selectedIndex === globalIndex ? 'bg-bm-hover-strong' : 'bg-bm-elevated'
       }`
       row.addEventListener('mousemove', () => {
         selectedIndex = globalIndex
@@ -210,14 +210,15 @@ export function mountSearch(container: HTMLElement): void {
       const top = document.createElement('div')
       top.className = 'flex items-center gap-1'
       const badge = document.createElement('span')
-      badge.className = 'text-[10px] px-2 py-0.5 rounded bg-gray-500 text-white shrink-0 min-w-[5rem] text-center'
+      badge.className =
+        'text-[10px] px-2 py-0.5 rounded-lg bg-bm-fg-muted text-bm-accent-fg shrink-0 min-w-[5rem] text-center'
       badge.textContent = formatTime(Date.now() - (item.history.lastVisitTime || 0))
       const title = document.createElement('p')
-      title.className = 'flex-1 truncate text-xs'
+      title.className = 'flex-1 truncate text-xs text-bm-fg'
       title.textContent = item.history.title || ''
       top.append(badge, title)
       const url = document.createElement('p')
-      url.className = 'details text-[11px] text-gray-500 truncate pl-1'
+      url.className = 'details text-[11px] text-bm-fg-muted truncate pl-1'
       url.textContent = `url: ${item.history.url || ''}`
       inner.append(top, url)
       row.appendChild(inner)

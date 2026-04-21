@@ -1,4 +1,4 @@
-import { renderAssistantMarkdown } from '@/lib/agent/markdown'
+import { renderAssistantContent } from '@/lib/agent/markdown'
 
 export type ChatMsg = Record<string, unknown>
 
@@ -121,7 +121,7 @@ function createAssistantTextBubble(text: string): HTMLElement {
   wrap.className = 'chat-msg chat-msg-assistant'
   const bubble = document.createElement('div')
   bubble.className = 'chat-bubble chat-bubble-assistant'
-  bubble.innerHTML = renderAssistantMarkdown(text)
+  bubble.innerHTML = renderAssistantContent(text)
   wrap.appendChild(bubble)
   return wrap
 }

@@ -5,10 +5,10 @@ const GROUP_COLORS = ['blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan'
 
 export function mountGroup(container: HTMLElement): void {
   const card = document.createElement('div')
-  card.className = 'rounded-lg border border-gray-200 bg-white p-2 shadow-sm'
+  card.className = 'rounded-2xl border border-bm-border bg-bm-card p-2 shadow-whisper'
 
   const label = document.createElement('span')
-  label.className = 'text-sm text-gray-500 font-bold block mb-1'
+  label.className = 'font-serif text-sm text-bm-fg-muted font-medium block mb-1'
   label.textContent = '分组'
 
   const row = document.createElement('div')
@@ -16,13 +16,14 @@ export function mountGroup(container: HTMLElement): void {
 
   const input = document.createElement('input')
   input.className =
-    'flex-1 min-h-8 border border-gray-300 rounded px-2 py-1 text-sm box-border focus:border-blue-500 focus:outline-none'
+    'flex-1 min-h-8 border border-bm-border-strong rounded-xl px-2 py-1 text-sm box-border bg-bm-input-bg text-bm-fg focus:outline-none focus:ring-1 focus:ring-[var(--bm-focus-ring)]'
   input.placeholder = '分组名#url正则'
   input.setAttribute('aria-label', '分组规则')
 
   const btn = document.createElement('button')
   btn.type = 'button'
-  btn.className = 'text-xs whitespace-nowrap shrink-0 px-2 py-1 border rounded bg-white hover:bg-gray-50'
+  btn.className =
+    'text-xs whitespace-nowrap shrink-0 px-2 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
   btn.textContent = '分组'
 
   row.append(input, btn)
@@ -33,7 +34,8 @@ export function mountGroup(container: HTMLElement): void {
   const mkBtn = (t: string, onClick: () => void) => {
     const b = document.createElement('button')
     b.type = 'button'
-    b.className = 'flex-1 min-w-[4rem] text-xs px-1 py-1 border rounded bg-white hover:bg-gray-50'
+    b.className =
+      'flex-1 min-w-[4rem] text-xs px-1 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
     b.textContent = t
     b.addEventListener('click', () => void onClick())
     return b

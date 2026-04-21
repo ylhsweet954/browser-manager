@@ -1,15 +1,21 @@
 import { AgentPanelController } from '@/lib/agent/AgentPanelController'
 import { createSettingsButton } from '@/entrypoints/sidepanel/features/settings'
+import { createThemeToggleButton } from '@/entrypoints/sidepanel/theme'
 import { mountGroup } from '@/entrypoints/sidepanel/features/group'
 import { mountSearch } from '@/entrypoints/sidepanel/features/search'
 import { mountWorkspace } from '@/entrypoints/sidepanel/features/workspace'
 
+const TAB_ACTIVE =
+  'tabs-btn px-3 py-2 text-xs font-medium rounded-t-lg border border-b-0 border-bm-border-strong bg-bm-elevated text-bm-fg z-[2] shadow-whisper'
+const TAB_INACTIVE =
+  'tabs-btn px-3 py-2 text-xs font-medium rounded-t-lg border border-transparent text-bm-fg-muted hover:bg-bm-hover z-[1]'
+
 export function mountApp(root: HTMLElement): void {
-  root.className = 'h-full flex flex-col min-h-0 bg-white'
+  root.className = 'h-full flex flex-col min-h-0 bg-bm-page'
 
   const tabBar = document.createElement('div')
   tabBar.className =
-    'flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-2 py-1'
+    'flex shrink-0 items-center justify-between gap-2 border-b border-bm-border bg-bm-toolbar backdrop-blur-md px-2 py-1.5'
 
   const tabGroup = document.createElement('div')
   tabGroup.className = 'flex min-w-0 items-center gap-0.5'
@@ -17,27 +23,27 @@ export function mountApp(root: HTMLElement): void {
 
   const btnTabs = document.createElement('button')
   btnTabs.type = 'button'
-  btnTabs.className =
-    'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-b-0 border-gray-200 bg-white text-gray-800 z-[2]'
+  btnTabs.className = TAB_ACTIVE
   btnTabs.textContent = '标签管理'
   btnTabs.setAttribute('role', 'tab')
   btnTabs.setAttribute('aria-selected', 'true')
 
   const btnAgent = document.createElement('button')
   btnAgent.type = 'button'
-  btnAgent.className =
-    'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-transparent text-gray-500 hover:bg-gray-100 z-[1]'
+  btnAgent.className = TAB_INACTIVE
   btnAgent.textContent = '小助手'
   btnAgent.setAttribute('role', 'tab')
   btnAgent.setAttribute('aria-selected', 'false')
 
   tabGroup.append(btnTabs, btnAgent)
 
+  const right = document.createElement('div')
+  right.className = 'flex shrink-0 items-center gap-1.5'
+  const themeBtn = createThemeToggleButton()
   const settingsBtn = createSettingsButton()
-  settingsBtn.className =
-    'shrink-0 px-2.5 py-1 text-xs border border-gray-200 rounded-md bg-white text-gray-700 hover:bg-gray-50'
+  right.append(themeBtn, settingsBtn)
 
-  tabBar.append(tabGroup, settingsBtn)
+  tabBar.append(tabGroup, right)
 
   const panels = document.createElement('div')
   panels.className = 'flex-1 min-h-0 relative'
@@ -81,15 +87,11 @@ export function mountApp(root: HTMLElement): void {
     btnTabs.setAttribute('aria-selected', String(isTabs))
     btnAgent.setAttribute('aria-selected', String(!isTabs))
     if (isTabs) {
-      btnTabs.className =
-        'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-b-0 border-gray-200 bg-white text-gray-800 z-[2]'
-      btnAgent.className =
-        'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-transparent text-gray-500 hover:bg-gray-100 z-[1]'
+      btnTabs.className = TAB_ACTIVE
+      btnAgent.className = TAB_INACTIVE
     } else {
-      btnAgent.className =
-        'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-b-0 border-gray-200 bg-white text-gray-800 z-[2]'
-      btnTabs.className =
-        'tabs-btn px-3 py-1.5 text-xs font-medium rounded-t border border-transparent text-gray-500 hover:bg-gray-100 z-[1]'
+      btnAgent.className = TAB_ACTIVE
+      btnTabs.className = TAB_INACTIVE
     }
   }
 

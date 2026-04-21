@@ -10,31 +10,33 @@ type Workspace = {
 
 export function mountWorkspace(container: HTMLElement): void {
   const card = document.createElement('div')
-  card.className = 'rounded-lg border border-gray-200 bg-white p-2 shadow-sm'
+  card.className = 'rounded-2xl border border-bm-border bg-bm-card p-2 shadow-whisper'
 
   const head = document.createElement('div')
-  head.className = 'flex justify-between items-center pb-1 mb-1 border-b border-dashed border-gray-300'
+  head.className = 'flex justify-between items-center pb-1 mb-1 border-b border-dashed border-bm-border-strong'
 
   const label = document.createElement('span')
-  label.className = 'text-sm text-gray-500 font-bold'
+  label.className = 'font-serif text-sm text-bm-fg-muted font-medium'
   label.textContent = '工作区'
 
   const toggleSave = document.createElement('button')
   toggleSave.type = 'button'
-  toggleSave.className = 'w-24 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50'
+  toggleSave.className =
+    'w-24 text-xs px-2 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
 
   const savePanel = document.createElement('div')
   savePanel.className = 'hidden flex gap-1 mb-2'
 
   const nameInput = document.createElement('input')
   nameInput.className =
-    'flex-1 min-h-8 border border-gray-300 rounded px-2 py-1 text-sm box-border focus:border-blue-500 focus:outline-none'
+    'flex-1 min-h-8 border border-bm-border-strong rounded-xl px-2 py-1 text-sm box-border bg-bm-input-bg text-bm-fg focus:outline-none focus:ring-1 focus:ring-[var(--bm-focus-ring)]'
   nameInput.placeholder = '输入工作区名称'
   nameInput.setAttribute('aria-label', '工作区名称')
 
   const saveBtn = document.createElement('button')
   saveBtn.type = 'button'
-  saveBtn.className = 'text-xs whitespace-nowrap shrink-0 px-2 py-1 border rounded bg-white hover:bg-gray-50'
+  saveBtn.className =
+    'text-xs whitespace-nowrap shrink-0 px-2 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
   saveBtn.textContent = '保存'
 
   savePanel.append(nameInput, saveBtn)
@@ -68,7 +70,7 @@ export function mountWorkspace(container: HTMLElement): void {
 
     if (workspaces.length === 0) {
       const empty = document.createElement('div')
-      empty.className = 'text-xs text-gray-400 text-center py-2'
+      empty.className = 'text-xs text-bm-fg-subtle text-center py-2'
       empty.textContent = '暂无保存的工作区'
       listHost.appendChild(empty)
       return
@@ -76,35 +78,40 @@ export function mountWorkspace(container: HTMLElement): void {
 
     for (const ws of workspaces) {
       const row = document.createElement('div')
-      row.className = 'flex items-center justify-between py-1 px-1 hover:bg-gray-100 rounded text-xs'
+      row.className =
+        'flex items-center justify-between py-1 px-1 hover:bg-bm-hover rounded-lg text-xs text-bm-fg'
 
       const info = document.createElement('div')
       info.className = 'flex-1 truncate'
-      info.innerHTML = `<span class="font-bold">${ws.name}</span><span class="text-gray-400 ml-1">${ws.tabs.length} 个标签 · ${formatDate(ws.createdAt)}</span>`
+      info.innerHTML = `<span class="font-medium font-serif">${ws.name}</span><span class="text-bm-fg-subtle ml-1">${ws.tabs.length} 个标签 · ${formatDate(ws.createdAt)}</span>`
 
       const actions = document.createElement('div')
       actions.className = 'flex gap-1 shrink-0'
 
       const restoreBtn = document.createElement('button')
       restoreBtn.type = 'button'
-      restoreBtn.className = 'text-xs px-2 py-0.5 min-h-6 border rounded'
+      restoreBtn.className =
+        'text-xs px-2 py-0.5 min-h-6 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
       restoreBtn.textContent = restoringId === ws.id ? '恢复中...' : '恢复'
       restoreBtn.disabled = restoringId === ws.id
       restoreBtn.addEventListener('click', () => void restoreWorkspace(ws))
 
       const delBtn = document.createElement('button')
       delBtn.type = 'button'
-      delBtn.className = 'text-xs px-2 py-0.5 min-h-6 border rounded'
+      delBtn.className =
+        'text-xs px-2 py-0.5 min-h-6 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
 
       if (confirmDeleteId === ws.id) {
         const ok = document.createElement('button')
         ok.type = 'button'
-        ok.className = 'text-xs px-2 py-0.5 min-h-6 border rounded bg-red-500 text-white'
+        ok.className =
+          'text-xs px-2 py-0.5 min-h-6 rounded-lg border border-[var(--color-error)] bg-[var(--color-error)] text-bm-accent-fg'
         ok.textContent = '确认'
         ok.addEventListener('click', () => void deleteWorkspace(ws.id))
         const cancel = document.createElement('button')
         cancel.type = 'button'
-        cancel.className = 'text-xs px-2 py-0.5 min-h-6 border rounded'
+        cancel.className =
+          'text-xs px-2 py-0.5 min-h-6 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted'
         cancel.textContent = '取消'
         cancel.addEventListener('click', () => {
           confirmDeleteId = null

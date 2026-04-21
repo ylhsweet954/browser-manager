@@ -174,12 +174,14 @@ export class AgentPanelController {
     right.appendChild(this.mcpUi.createTriggerButton())
     const stopBtn = document.createElement('button')
     stopBtn.type = 'button'
-    stopBtn.className = 'text-xs px-2 py-1 border rounded hidden'
+    stopBtn.className =
+      'text-xs px-2 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hidden hover:bg-bm-hover'
     stopBtn.textContent = '停止'
     stopBtn.dataset.act = 'stop'
     const sendBtn = document.createElement('button')
     sendBtn.type = 'button'
-    sendBtn.className = 'text-xs px-2 py-1 border rounded bg-blue-600 text-white'
+    sendBtn.className =
+      'text-xs px-3 py-1.5 rounded-xl border border-bm-accent bg-bm-accent text-bm-accent-fg hover:opacity-95 shadow-whisper'
     sendBtn.textContent = '发送'
     sendBtn.dataset.act = 'send'
     right.append(stopBtn, sendBtn)
@@ -237,7 +239,7 @@ export class AgentPanelController {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className =
-      'text-xs whitespace-nowrap bg-gray-100 text-gray-700 border border-gray-300 rounded px-2 py-1 hover:bg-gray-200'
+      'text-xs whitespace-nowrap rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted px-2 py-1 hover:bg-bm-hover'
     btn.textContent = '画像'
     btn.addEventListener('click', () => void this.openProfileDialog())
     return btn
@@ -257,11 +259,11 @@ export class AgentPanelController {
       const left = document.createElement('div')
       left.className = 'flex items-center gap-2'
       const t = document.createElement('div')
-      t.className = 'text-sm font-bold text-gray-500'
+      t.className = 'font-serif text-sm font-medium text-bm-fg-muted'
       t.textContent = '浏览偏好画像'
       const analyzeBtn = document.createElement('button')
       analyzeBtn.type = 'button'
-      analyzeBtn.className = 'text-[11px] text-gray-500 bg-transparent border-none cursor-pointer'
+      analyzeBtn.className = 'text-[11px] text-bm-coral bg-transparent border-none cursor-pointer hover:underline'
       analyzeBtn.textContent = analyzing ? '分析中…' : '↻ 立即分析'
       analyzeBtn.disabled = analyzing
       analyzeBtn.addEventListener('click', async () => {
@@ -279,7 +281,7 @@ export class AgentPanelController {
       })
       left.append(t, analyzeBtn)
       const swLab = document.createElement('label')
-      swLab.className = 'flex items-center gap-2 text-xs text-gray-500'
+      swLab.className = 'flex items-center gap-2 text-xs text-bm-fg-muted'
       const sw = document.createElement('input')
       sw.type = 'checkbox'
       sw.checked = enabled
@@ -293,15 +295,16 @@ export class AgentPanelController {
       body.appendChild(head)
       if (!enabled) {
         const off = document.createElement('div')
-        off.className = 'text-xs text-gray-400'
+        off.className = 'text-xs text-bm-fg-subtle'
         off.textContent = '画像注入已关闭，对话不会包含画像信息。已有画像数据仍保留。'
         body.appendChild(off)
       }
       const sub = document.createElement('div')
-      sub.className = 'text-xs font-semibold text-gray-500'
+      sub.className = 'text-xs font-medium text-bm-fg-muted'
       sub.textContent = '当前画像'
       const box = document.createElement('div')
-      box.className = 'p-3 border border-gray-200 rounded bg-gray-50 text-xs text-gray-700 max-h-64 overflow-y-auto whitespace-pre-wrap'
+      box.className =
+        'p-3 border border-bm-border rounded-xl bg-bm-muted text-xs text-bm-fg max-h-64 overflow-y-auto whitespace-pre-wrap'
       box.textContent = summary || '（暂无）'
       body.append(sub, box)
     }
@@ -313,7 +316,7 @@ export class AgentPanelController {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className =
-      'text-xs whitespace-nowrap bg-gray-100 text-gray-700 border border-gray-300 rounded px-2 py-1 hover:bg-gray-200'
+      'text-xs whitespace-nowrap rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted px-2 py-1 hover:bg-bm-hover'
     const refresh = () => {
       const c = this.agentSkills.skills.length
       btn.textContent = c > 0 ? `Skills (${c})` : 'Skills'
@@ -322,15 +325,16 @@ export class AgentPanelController {
     btn.addEventListener('click', () => {
       const body = document.createElement('div')
       body.className = 'text-xs space-y-2 max-w-[720px]'
-      body.innerHTML = `<div class="text-sm font-bold text-gray-500 mb-2">Skills</div>
-        <div class="text-xs text-gray-500 mb-2">配置环境变量 \`SKILLS_DIR=/path/to/skills\`，启动 \`npx -y mcp-skill-bridge\`，默认地址 <code>http://localhost:5151/mcp</code>。</div>
-        <div class="text-xs text-amber-700 mb-2">skills 功能处于测试阶段。</div>`
+      body.innerHTML = `<div class="font-serif text-sm font-medium text-bm-fg-muted mb-2">Skills</div>
+        <div class="text-xs text-bm-fg-muted mb-2 leading-relaxed">配置环境变量 \`SKILLS_DIR=/path/to/skills\`，启动 \`npx -y mcp-skill-bridge\`，默认地址 <code class="font-mono text-[11px]">http://localhost:5151/mcp</code>。</div>
+        <div class="text-xs text-bm-coral mb-2">skills 功能处于测试阶段。</div>`
       const urlRow = document.createElement('div')
       const urlLab = document.createElement('label')
-      urlLab.className = 'block text-xs text-gray-500 mb-0.5'
+      urlLab.className = 'block text-xs text-bm-fg-muted mb-0.5'
       urlLab.textContent = 'skill-bridge 地址'
       const urlIn = document.createElement('input')
-      urlIn.className = 'w-full border rounded px-2 py-1.5 text-sm box-border'
+      urlIn.className =
+        'w-full border border-bm-border-strong rounded-xl px-2 py-1.5 text-sm box-border bg-bm-input-bg text-bm-fg'
       urlIn.value = this.agentSkills.serverUrl || ''
       urlIn.placeholder = 'http://localhost:5151/mcp'
       urlIn.addEventListener('input', () => {
@@ -342,7 +346,7 @@ export class AgentPanelController {
       const loadRow = document.createElement('div')
       loadRow.className = 'flex items-center justify-between gap-2 flex-wrap mt-2'
       const status = document.createElement('div')
-      status.className = 'text-xs text-gray-400'
+      status.className = 'text-xs text-bm-fg-subtle'
       const updateStatus = () => {
         status.textContent = this.agentSkills.loadedAt
           ? `已加载 ${this.agentSkills.skills.length} 个 skills`
@@ -350,7 +354,8 @@ export class AgentPanelController {
       }
       updateStatus()
       const loadBtn = document.createElement('button')
-      loadBtn.className = 'text-xs px-3 py-1 border rounded'
+      loadBtn.className =
+        'text-xs px-3 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
       loadBtn.textContent = 'Load'
       loadBtn.addEventListener('click', async () => {
         const serverUrl = urlIn.value.trim()
@@ -393,17 +398,17 @@ export class AgentPanelController {
         listHost.innerHTML = ''
         if (this.agentSkills.skills.length === 0) {
           const empty = document.createElement('div')
-          empty.className = 'text-xs text-gray-400 border border-dashed rounded p-3'
+          empty.className = 'text-xs text-bm-fg-subtle border border-dashed border-bm-border rounded-xl p-3'
           empty.textContent = '暂无已加载的 skill 索引'
           listHost.appendChild(empty)
           return
         }
         for (const skill of this.agentSkills.skills) {
           const card = document.createElement('div')
-          card.className = 'rounded border border-gray-100 p-2 mb-2'
-          card.innerHTML = `<div class="text-xs font-medium break-all">${skill.name || 'Unnamed Skill'}</div>
-            <div class="text-xs text-gray-400 mt-1 break-all">${skill.path}</div>
-            <div class="text-xs text-gray-500 mt-1">${skill.description || '无描述'}</div>`
+          card.className = 'rounded-xl border border-bm-border p-2 mb-2 bg-bm-muted'
+          card.innerHTML = `<div class="text-xs font-medium break-all text-bm-fg">${skill.name || 'Unnamed Skill'}</div>
+            <div class="text-xs text-bm-fg-subtle mt-1 break-all">${skill.path}</div>
+            <div class="text-xs text-bm-fg-muted mt-1">${skill.description || '无描述'}</div>`
           listHost.appendChild(card)
         }
       }
@@ -420,16 +425,16 @@ export class AgentPanelController {
     host.setAttribute('data-skill-tools', '1')
     host.className = 'mt-2 space-y-2'
     const t = document.createElement('div')
-    t.className = 'text-xs font-medium text-gray-500'
+    t.className = 'text-xs font-medium text-bm-fg-muted'
     t.textContent = 'skill-bridge 工具'
     host.appendChild(t)
     for (const tool of this.skillStationTools) {
       const card = document.createElement('div')
-      card.className = 'rounded border border-gray-100 p-2'
-      card.innerHTML = `<div class="text-xs font-medium break-all">${String(tool.name)}</div>
-        <div class="text-xs text-gray-400 mt-1">${String(tool.description || '无描述')}</div>`
+      card.className = 'rounded-xl border border-bm-border p-2 bg-bm-muted'
+      card.innerHTML = `<div class="text-xs font-medium break-all text-bm-fg">${String(tool.name)}</div>
+        <div class="text-xs text-bm-fg-subtle mt-1">${String(tool.description || '无描述')}</div>`
       const cbRow = document.createElement('label')
-      cbRow.className = 'flex items-center gap-1 text-xs text-red-600 mt-2'
+      cbRow.className = 'flex items-center gap-1 text-xs text-[var(--color-error)] mt-2'
       const cb = document.createElement('input')
       cb.type = 'checkbox'
       cb.checked = !!tool._dangerous
@@ -470,8 +475,8 @@ export class AgentPanelController {
             <div class="schedule-dialog-subtitle">显示待执行任务和最近 24 小时内的执行记录</div>
           </div>
           <div class="schedule-dialog-actions">
-            <button type="button" data-ref class="text-xs px-3 py-1 border rounded bg-gray-100">刷新</button>
-            <button type="button" data-clr class="text-xs px-3 py-1 border rounded bg-red-50 text-red-700">删除结束项</button>
+            <button type="button" data-ref class="text-xs px-3 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover">刷新</button>
+            <button type="button" data-clr class="text-xs px-3 py-1.5 rounded-lg border border-[#b53333]/40 bg-[var(--bm-error-bg)] text-[var(--color-error)] hover:opacity-90">删除结束项</button>
           </div>
         </div>`
       if (err) {
@@ -490,7 +495,7 @@ export class AgentPanelController {
         list.className = 'schedule-job-list'
         for (const job of jobs) {
           const card = document.createElement('div')
-          card.className = 'schedule-job-card p-3 mb-2 border rounded'
+          card.className = 'schedule-job-card p-3 mb-2'
           const st = String(job.status || '')
           card.innerHTML = `
             <div class="schedule-job-row">
@@ -720,9 +725,9 @@ export class AgentPanelController {
       getDangerousToolMeta(this.pendingApproval.toolCall, this.combinedMcpTools)
     if (!meta) return
     card.style.display = 'block'
-    card.className = 'border border-red-200 rounded p-2 mb-1 bg-red-50/50'
-    card.innerHTML = `<div class="text-xs font-semibold text-red-600 mb-1">${meta.title || '危险工具待确认'}</div>
-      <div class="text-xs text-gray-600 mb-2">${meta.description || ''}</div>`
+    card.className = 'border border-[#b53333]/40 rounded-xl p-2 mb-1 bg-[var(--bm-error-bg)]'
+    card.innerHTML = `<div class="text-xs font-semibold text-[var(--color-error)] mb-1">${meta.title || '危险工具待确认'}</div>
+      <div class="text-xs text-bm-fg-muted mb-2">${meta.description || ''}</div>`
     const pre = document.createElement('pre')
     pre.className = 'tool-result-content text-xs mb-2'
     pre.textContent = JSON.stringify(
@@ -735,12 +740,14 @@ export class AgentPanelController {
     row.className = 'flex justify-end gap-2'
     const cancel = document.createElement('button')
     cancel.type = 'button'
-    cancel.className = 'text-xs px-2 py-1 border rounded'
+    cancel.className =
+      'text-xs px-2 py-1.5 rounded-lg border border-bm-border-strong bg-bm-elevated text-bm-fg-muted hover:bg-bm-hover'
     cancel.textContent = '取消'
     cancel.addEventListener('click', () => this.resolveDangerousToolApproval(false))
     const ok = document.createElement('button')
     ok.type = 'button'
-    ok.className = 'text-xs px-2 py-1 border rounded bg-blue-600 text-white'
+    ok.className =
+      'text-xs px-2 py-1.5 rounded-lg border border-bm-accent bg-bm-accent text-bm-accent-fg hover:opacity-95'
     ok.textContent = meta.confirmLabel || '确认执行'
     ok.addEventListener('click', () => this.resolveDangerousToolApproval(true))
     row.append(cancel, ok)
