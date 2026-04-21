@@ -1,6 +1,11 @@
 /* global chrome */
 import { resolveLlmRequestUrl } from '@/lib/api/llmEndpoint'
-import { defaultLlmModelForApiType } from '@/lib/config/llmDefaults'
+import {
+  defaultLlmModelForApiType,
+  envDefaultLlmApiKey,
+  envDefaultLlmBaseUrl,
+  envDefaultLlmModel,
+} from '@/lib/config/llmDefaults'
 import { clearReuseDomainPolicies, getReuseDomainPolicies } from '@/lib/api/tabReuse'
 import { openModal } from '@/entrypoints/sidepanel/ui/modal'
 import { toast } from '@/entrypoints/sidepanel/ui/toast'
@@ -8,9 +13,9 @@ import { toast } from '@/entrypoints/sidepanel/ui/toast'
 const DEFAULT_SETTINGS = {
   llmConfig: {
     apiType: 'openai' as 'openai' | 'anthropic',
-    baseUrl: '',
-    apiKey: '',
-    model: '',
+    baseUrl: envDefaultLlmBaseUrl(),
+    apiKey: envDefaultLlmApiKey(),
+    model: envDefaultLlmModel(),
     firstPacketTimeoutSeconds: 20,
     supportsImageInput: true,
   },

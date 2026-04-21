@@ -19,7 +19,12 @@ import {
 } from '@/lib/agent/panel-helpers'
 import { createChatMessageEl, type ChatMsg } from '@/lib/agent/render-messages'
 import { executeTool, streamChat } from '@/lib/api/llm'
-import { resolveStoredLlmModel } from '@/lib/config/llmDefaults'
+import {
+  envDefaultLlmApiKey,
+  envDefaultLlmBaseUrl,
+  envDefaultLlmModel,
+  resolveStoredLlmModel,
+} from '@/lib/config/llmDefaults'
 import {
   createSession,
   deleteSession,
@@ -126,7 +131,8 @@ export class AgentPanelController {
   }
 
   private buildDom(): void {
-    this.root.className = 'agent-panel'
+    // 保留侧栏挂载时赋予的布局与 hidden（勿用 className 整体覆盖，否则会丢失「标签管理」下的隐藏态）
+    this.root.classList.add('agent-panel')
     this.root.innerHTML = ''
     const toolbar = document.createElement('div')
     toolbar.className = 'chat-toolbar'
@@ -612,7 +618,9 @@ export class AgentPanelController {
   }
 
   private renderMessages(): void {
-    this.el.messages.querySelectorAll('.chat-msg, .chat-msg-group').forEach((n) => n.remove())
+    this.el.messages
+      .querySelectorAll('.chat-msg, .chat-msg-group, .chat-empty')
+      .forEach((n) => n.remove())
     if (this.messages.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'chat-empty'
@@ -622,8 +630,6 @@ export class AgentPanelController {
       this.el.messages.insertBefore(empty, this.el.messagesEnd)
       return
     }
-    const empty = this.el.messages.querySelector('.chat-empty')
-    empty?.remove()
     this.messages.forEach((msg, i) => {
       const node = createChatMessageEl(msg, i, {
         onRewindToUserMessage: (idx) => this.handleRewindToUserMessage(idx),
@@ -818,6 +824,14 @@ export class AgentPanelController {
     const cur = this.activeSessionId
     if (cur) {
       const msgs = this.getSessionMessages(cur)
+      const sessionStillExists = this.sessions.some((s) => s.id === cur)
+      if (msgs.length === 0 && sessionStillExists) {
+        this.stopSessionGeneration(cur)
+        this.el.input.value = ''
+        this.showHistory = false
+        this.renderAll()
+        return
+      }
       if (msgs.length > 0) await this.autoSave(cur, msgs)
     }
     const id = generateSessionId()
@@ -900,9 +914,9 @@ export class AgentPanelController {
     const { llmConfig } = await chrome.storage.local.get({
       llmConfig: {
         apiType: 'openai',
-        baseUrl: '',
-        apiKey: '',
-        model: '',
+        baseUrl: envDefaultLlmBaseUrl(),
+        apiKey: envDefaultLlmApiKey(),
+        model: envDefaultLlmModel(),
         firstPacketTimeoutSeconds: 20,
         supportsImageInput: true,
       },

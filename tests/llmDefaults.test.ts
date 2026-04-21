@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CODE_DEFAULT_LLM_MODEL_ANTHROPIC,
-  CODE_DEFAULT_LLM_MODEL_OPENAI,
   defaultLlmModelForApiType,
   resolveStoredLlmModel,
 } from '@/lib/config/llmDefaults'
 
 describe('llmDefaults', () => {
-  it('defaultLlmModelForApiType 返回各类型内置默认', () => {
-    expect(defaultLlmModelForApiType('openai')).toBe(CODE_DEFAULT_LLM_MODEL_OPENAI)
-    expect(defaultLlmModelForApiType('anthropic')).toBe(CODE_DEFAULT_LLM_MODEL_ANTHROPIC)
+  it('defaultLlmModelForApiType 与 resolveStoredLlmModel(空存储) 一致', () => {
+    expect(resolveStoredLlmModel('openai', '')).toBe(defaultLlmModelForApiType('openai'))
+    expect(resolveStoredLlmModel('anthropic', undefined)).toBe(
+      defaultLlmModelForApiType('anthropic'),
+    )
+    expect(resolveStoredLlmModel('openai', '   ')).toBe(defaultLlmModelForApiType('openai'))
   })
 
   it('resolveStoredLlmModel 在非空时保留用户配置', () => {
@@ -17,9 +18,8 @@ describe('llmDefaults', () => {
     expect(resolveStoredLlmModel('anthropic', ' claude-3 ')).toBe('claude-3')
   })
 
-  it('resolveStoredLlmModel 在空或仅空白时使用默认', () => {
-    expect(resolveStoredLlmModel('openai', '')).toBe(CODE_DEFAULT_LLM_MODEL_OPENAI)
-    expect(resolveStoredLlmModel('anthropic', undefined)).toBe(CODE_DEFAULT_LLM_MODEL_ANTHROPIC)
-    expect(resolveStoredLlmModel('openai', '   ')).toBe(CODE_DEFAULT_LLM_MODEL_OPENAI)
+  it('defaultLlmModelForApiType 返回非空字符串', () => {
+    expect(defaultLlmModelForApiType('openai').length).toBeGreaterThan(0)
+    expect(defaultLlmModelForApiType('anthropic').length).toBeGreaterThan(0)
   })
 })

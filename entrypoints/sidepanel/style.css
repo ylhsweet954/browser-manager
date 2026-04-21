@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* HTML hidden 必须压过 Tailwind .flex、chat.css .agent-panel 等 display，否则两个主面板会同时可见并叠在一起 */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {

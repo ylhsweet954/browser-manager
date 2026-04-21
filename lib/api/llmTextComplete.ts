@@ -1,4 +1,9 @@
-import { resolveStoredLlmModel } from "@/lib/config/llmDefaults";
+import {
+  envDefaultLlmApiKey,
+  envDefaultLlmBaseUrl,
+  envDefaultLlmModel,
+  resolveStoredLlmModel,
+} from "@/lib/config/llmDefaults";
 import type { LlmApiType } from "./llmEndpoint";
 import { resolveLlmRequestUrl } from "./llmEndpoint";
 
@@ -134,9 +139,9 @@ async function _anthropicComplete(config: LlmTextConfig, messages: LlmTextMessag
 
 const DEFAULT_LLM_STORAGE: LlmTextConfig = {
   apiType: "openai",
-  baseUrl: "",
-  apiKey: "",
-  model: "",
+  baseUrl: envDefaultLlmBaseUrl(),
+  apiKey: envDefaultLlmApiKey(),
+  model: envDefaultLlmModel(),
 };
 
 /**
